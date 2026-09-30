@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rex Legend</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="game-canvas"></canvas>
+
+    <!-- HUD -->
+    <div id="hud">
+      <div id="health-bar">
+        <div id="health-fill"></div>
+        <span id="health-text">HP 100 / 100</span>
+      </div>
+      <div id="score">擊殺: 0</div>
+      <div id="level-row">
+        <span id="level">Lv.1</span>
+        <div id="xp-bar"><div id="xp-fill"></div></div>
+      </div>
+      <div id="kills">
+        <span class="kill-item">史萊姆 <b id="kill-slime">0</b></span>
+        <span class="kill-item">頭目 <b id="kill-boss">0</b></span>
+        <span class="kill-item">兔子 <b id="kill-rabbit">0</b></span>
+      </div>
+      <div id="bomb-inv">💣 炸彈庫存 <b id="bomb-count-inv">0</b></div>
+    </div>
+
+    <!-- 靠近炸彈時的拾取提示 -->
+    <div id="pickup-hint">按 <b>E</b> 拾取炸彈</div>
+
+    <!-- 升級提示 -->
+    <div id="levelup"></div>
+
+    <!-- 大 Boss 出現警告 -->
+    <div id="boss-warn"></div>
+
+    <!-- 準心 / 提示 -->
+    <div id="crosshair"></div>
+
+    <!-- 受傷時的紅色畫面暈染 -->
+    <div id="hurt-vignette"></div>
+
+    <!-- 暫停 / 設定選單 (按 ESC 叫出) -->
+    <div id="pause-screen" class="hidden">
+      <div class="panel">
+        <h1>選單</h1>
+        <p class="subtitle">遊戲已暫停</p>
+
+        <div class="setting">
+          <label for="slime-count">史萊姆數量</label>
+          <div class="slider-row">
+            <input id="slime-count" type="range" min="0" max="60" step="1" value="60" />
+            <span id="slime-count-val">60</span>
+          </div>
+        </div>
+
+        <div class="setting">
+          <label for="sensitivity">滑鼠靈敏度</label>
+          <div class="slider-row">
+            <input id="sensitivity" type="range" min="1" max="10" step="1" value="4" />
+            <span id="sensitivity-val">4</span>
+          </div>
+        </div>
+
+        <div class="setting">
+          <label for="bomb-count">炸彈數量</label>
+          <div class="slider-row">
+            <input id="bomb-count" type="range" min="0" max="10" step="1" value="3" />
+            <span id="bomb-count-val">3</span>
+          </div>
+        </div>
+
+        <div class="setting">
+          <label>測試工具</label>
+          <button id="levelup-test-btn" class="small-btn">+10 等級</button>
+        </div>
+
+        <button id="resume-btn">繼續遊戲</button>
+        <p class="hint">按 ESC 或點「繼續遊戲」回到遊戲</p>
+      </div>
+    </div>
+
+    <!-- 開始畫面 -->
+    <div id="start-screen">
+      <div class="panel">
+        <h1>REX LEGEND</h1>
+        <p class="subtitle">第三人稱 3D 探索・史萊姆討伐</p>
+        <div class="controls">
+          <div><span class="key">W A S D</span> 移動</div>
+          <div><span class="key">滑鼠</span> 轉動視角</div>
+          <div><span class="key">空白鍵</span> 跳躍</div>
+          <div><span class="key">滑鼠左鍵</span> 揮劍</div>
+          <div><span class="key">滑鼠中鍵</span> 閃避空翻</div>
+          <div><span class="key">滑鼠右鍵</span> 點按=閃電・長按=火焰</div>
+          <div><span class="key">Caps Lock</span> 切換奔跑</div>
+          <div><span class="key">Shift</span> 平行移動 (面朝前方)</div>
+          <div><span class="key">E</span> 拾取 / 投擲炸彈</div>
+        </div>
+        <button id="start-btn">開始遊戲</button>
+        <p class="hint">點擊後會鎖定滑鼠，按 ESC 可解除</p>
+      </div>
+    </div>
+
+    <!-- 死亡畫面 -->
+    <div id="death-screen" class="hidden">
+      <div class="panel">
+        <h1>你倒下了</h1>
+        <p id="death-score">擊殺數: 0</p>
+        <button id="respawn-btn">重新開始</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

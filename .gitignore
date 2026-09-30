@@ -1,0 +1,17 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 編輯器 / IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# Python (serve.py 執行時產生)
+__pycache__/
+*.pyc
+
+# 日誌 / 暫存
+*.log

@@ -1,0 +1,364 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  font-family: "Segoe UI", "Microsoft JhengHei", sans-serif;
+  color: #fff;
+  user-select: none;
+}
+
+#game-container {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+}
+
+#game-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ---------- HUD ---------- */
+#hud {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  z-index: 10;
+  pointer-events: none;
+}
+
+#health-bar {
+  position: relative;
+  width: 260px;
+  height: 26px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+#health-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #ff4d4d, #ff884d);
+  transition: width 0.2s ease;
+}
+
+#health-text {
+  position: absolute;
+  width: 100%;
+  text-align: center;
+  line-height: 26px;
+  font-size: 13px;
+  font-weight: 700;
+  text-shadow: 0 1px 2px #000;
+}
+
+#score {
+  margin-top: 12px;
+  font-size: 20px;
+  font-weight: 700;
+  text-shadow: 0 2px 4px #000;
+}
+
+#level-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+#level {
+  font-size: 18px;
+  font-weight: 800;
+  color: #ffd447;
+  text-shadow: 0 2px 4px #000;
+}
+
+#xp-bar {
+  width: 180px;
+  height: 12px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+#xp-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #ffe14d, #ffb84d);
+  transition: width 0.2s ease;
+}
+
+#levelup {
+  position: absolute;
+  top: 30%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.8);
+  z-index: 9;
+  font-size: 46px;
+  font-weight: 900;
+  color: #ffe14d;
+  text-shadow: 0 0 18px rgba(255, 200, 60, 0.9), 0 3px 6px #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+#levelup.show {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1.15);
+}
+
+/* ---------- 擊殺計數表 ---------- */
+#kills {
+  margin-top: 8px;
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+  color: #cdd8ea;
+  text-shadow: 0 1px 3px #000;
+}
+
+#kills .kill-item b {
+  color: #7ee8fa;
+  font-size: 15px;
+}
+
+#bomb-inv {
+  margin-top: 6px;
+  font-size: 14px;
+  color: #cdd8ea;
+  text-shadow: 0 1px 3px #000;
+}
+
+#bomb-inv b {
+  color: #ffb84d;
+  font-size: 16px;
+}
+
+/* 靠近炸彈的拾取提示 */
+#pickup-hint {
+  position: absolute;
+  bottom: 22%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9;
+  padding: 8px 18px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 10px;
+  font-size: 16px;
+  color: #fff;
+  text-shadow: 0 1px 3px #000;
+  pointer-events: none;
+  display: none;
+}
+
+#pickup-hint b {
+  color: #ffd447;
+}
+
+#pickup-hint.show {
+  display: block;
+}
+
+/* ---------- 大 Boss 警告 ---------- */
+#boss-warn {
+  position: absolute;
+  top: 22%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.8);
+  z-index: 9;
+  font-size: 40px;
+  font-weight: 900;
+  color: #ff5533;
+  text-shadow: 0 0 20px rgba(255, 60, 30, 0.9), 0 3px 6px #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  white-space: nowrap;
+}
+
+#boss-warn.show {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1.1);
+}
+
+/* ---------- 受傷畫面暈染 ---------- */
+#hurt-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow: inset 0 0 140px 40px rgba(200, 0, 0, 0.75);
+  transition: opacity 0.45s ease;
+}
+
+#hurt-vignette.show {
+  opacity: 1;
+  transition: opacity 0.05s ease; /* 受傷瞬間快速亮起 */
+}
+
+/* ---------- 準心 ---------- */
+#crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 50%;
+  z-index: 5;
+  pointer-events: none;
+  display: none;
+}
+
+/* ---------- 面板 (開始 / 死亡) ---------- */
+#start-screen, #death-screen, #pause-screen {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at center, rgba(20, 30, 50, 0.85), rgba(0, 0, 0, 0.95));
+  backdrop-filter: blur(4px);
+}
+
+.hidden {
+  display: none !important;
+}
+
+.panel {
+  text-align: center;
+  padding: 40px 56px;
+  background: rgba(10, 15, 30, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 18px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+
+.panel h1 {
+  font-size: 52px;
+  letter-spacing: 6px;
+  background: linear-gradient(90deg, #7ee8fa, #80ff72);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  margin-bottom: 8px;
+}
+
+.subtitle {
+  color: #a9b7d0;
+  margin-bottom: 28px;
+  font-size: 15px;
+}
+
+.controls {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 30px;
+  font-size: 15px;
+  color: #d5deed;
+}
+
+.controls .key {
+  display: inline-block;
+  min-width: 90px;
+  padding: 3px 10px;
+  margin-right: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 6px;
+  font-weight: 700;
+  color: #7ee8fa;
+}
+
+button {
+  padding: 12px 40px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #06121f;
+  background: linear-gradient(90deg, #7ee8fa, #80ff72);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: transform 0.1s ease, box-shadow 0.2s ease;
+}
+
+button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(126, 232, 250, 0.4);
+}
+
+.hint {
+  margin-top: 16px;
+  font-size: 12px;
+  color: #6b7890;
+}
+
+#death-screen .panel h1 {
+  background: linear-gradient(90deg, #ff6b6b, #ffb86b);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+#death-score {
+  font-size: 22px;
+  margin: 12px 0 28px;
+  color: #d5deed;
+}
+
+/* ---------- 設定選單 ---------- */
+.setting {
+  margin: 18px 0;
+  text-align: left;
+}
+
+.setting label {
+  display: block;
+  font-size: 14px;
+  color: #a9b7d0;
+  margin-bottom: 8px;
+}
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.slider-row input[type="range"] {
+  flex: 1;
+  accent-color: #7ee8fa;
+  cursor: pointer;
+}
+
+.slider-row span {
+  min-width: 32px;
+  text-align: right;
+  font-weight: 700;
+  color: #7ee8fa;
+}
+
+.small-btn {
+  padding: 8px 20px;
+  font-size: 15px;
+  background: linear-gradient(90deg, #ffd447, #ff9f43);
+}
