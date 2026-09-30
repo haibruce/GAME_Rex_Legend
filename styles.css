@@ -436,20 +436,46 @@ button:hover {
   touch-action: none;
 }
 
-#tc-attack-hint {
+/* 右下：攻擊 / 魔法 獨立大圓鈕 (短按/長按效果保留) */
+.tc-action-btn {
   position: absolute;
-  right: 24px; bottom: 30px;
-  width: 96px; height: 96px;
+  pointer-events: auto;
+  touch-action: none;
   border-radius: 50%;
-  border: 2px dashed rgba(255, 255, 255, 0.4);
-  color: rgba(255, 255, 255, 0.8);
-  font-size: 13px;
-  line-height: 1.4;
+  border: 3px solid rgba(255, 255, 255, 0.55);
+  color: #fff;
+  font-size: 34px;
+  font-weight: 700;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  text-align: center;
-  text-shadow: 0 1px 3px #000;
+  text-shadow: 0 2px 4px #000;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.tc-action-btn span {
+  font-size: 15px;
+  margin-top: 2px;
+}
+.tc-action-btn:active {
+  filter: brightness(1.3);
+  transform: scale(0.94);
+}
+
+/* 攻擊鈕：右下最外側、最大 */
+#tc-attack {
+  right: 30px; bottom: 40px;
+  width: 130px; height: 130px;
+  background: radial-gradient(circle at 35% 30%, rgba(160, 232, 255, 0.95), rgba(40, 120, 200, 0.9));
+}
+
+/* 魔法鈕：攻擊鈕左上方、略小 */
+#tc-magic {
+  right: 168px; bottom: 118px;
+  width: 108px; height: 108px;
+  background: radial-gradient(circle at 35% 30%, rgba(210, 160, 255, 0.95), rgba(150, 60, 220, 0.9));
 }
 
 /* 通用觸控按鈕 */
@@ -467,14 +493,18 @@ button:hover {
   touch-action: manipulation;
 }
 
+/* 炸彈鈕：移到右上角並加大 (平常好按) */
 #tc-bomb {
-  top: 54px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 16px;
+  right: 20px;
+  padding: 18px 30px;
+  font-size: 22px;
+  border-radius: 14px;
   background: linear-gradient(90deg, #ffb84d, #ff884d);
   color: #3a1500;
 }
 
+/* 選單鈕：最上方中央 */
 #tc-esc {
   top: 10px;
   left: 50%;

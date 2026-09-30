@@ -50,13 +50,14 @@
       <div id="tc-move-zone">
         <div id="tc-stick-base"><div id="tc-stick-knob"></div></div>
       </div>
-      <!-- 右半：視角拖曳 + 點擊攻擊 / 雙擊魔法 -->
-      <div id="tc-look-zone">
-        <div id="tc-attack-hint">點擊=攻擊<br>雙擊=魔法</div>
-      </div>
-      <!-- 上方中央：丟炸彈 -->
+      <!-- 右半：單指拖曳視角 (攻擊/魔法改用下方獨立按鈕) -->
+      <div id="tc-look-zone"></div>
+      <!-- 右下：攻擊鈕 (短按單擊 / 按住連段) 與 魔法鈕 (短按閃電 / 按住火焰) -->
+      <button id="tc-attack" class="tc-action-btn">⚔<span>攻擊</span></button>
+      <button id="tc-magic" class="tc-action-btn">✦<span>魔法</span></button>
+      <!-- 右上：丟炸彈 (加大好按) -->
       <button id="tc-bomb" class="tc-btn">💣 炸彈</button>
-      <!-- 最上方：ESC 選單 -->
+      <!-- 最上方中央：選單 -->
       <button id="tc-esc" class="tc-btn">☰ 選單</button>
     </div>
 
@@ -74,11 +75,21 @@
           </div>
         </div>
 
-        <div class="setting">
+        <!-- 滑鼠靈敏度：PC 用 (手機隱藏) -->
+        <div class="setting" id="setting-mouse-sens">
           <label for="sensitivity">滑鼠靈敏度</label>
           <div class="slider-row">
             <input id="sensitivity" type="range" min="1" max="10" step="1" value="4" />
             <span id="sensitivity-val">4</span>
+          </div>
+        </div>
+
+        <!-- 觸控靈敏度：手機用 (PC 隱藏)，與滑鼠獨立 -->
+        <div class="setting" id="setting-touch-sens">
+          <label for="touch-sensitivity">觸控靈敏度</label>
+          <div class="slider-row">
+            <input id="touch-sensitivity" type="range" min="1" max="10" step="1" value="4" />
+            <span id="touch-sensitivity-val">4</span>
           </div>
         </div>
 

@@ -41,9 +41,10 @@ class Game {
     this.megaBosses = [];   // 場上的大 Boss
     this.swordWaves = [];   // 飛行中的劍氣
 
-    // 攝影機環繞角度
+    // 攝影機環繞角度與距離 (距離可縮放)
     this.camYaw = 0;
     this.camPitch = 0.25;
+    this.camDistance = CONFIG.camera.distance; // 目前縮放距離
 
     this._spawnInitialSlimes();
     this._resize();
@@ -86,6 +87,7 @@ class Game {
       const escBtn = document.getElementById("tc-esc");
       if (bombBtn) bombBtn.addEventListener("click", () => this._handleBombActionForce());
       if (escBtn) escBtn.addEventListener("click", () => { this.paused ? this._resume() : this._pause(); });
+      this._setupActionButtons();
     }
 
     // 桌機：遊戲中失去滑鼠鎖定 (ESC/切換視窗) 自動暫停 (手機不用 pointer lock)
@@ -96,6 +98,12 @@ class Game {
         this._pause();
       }
     });
+
+    // PC 滑鼠滾輪：縮放第三人稱距離
+    window.addEventListener("wheel", (e) => {
+      if (!this.running || this.paused) return;
+      this._zoomCamera(Math.sign(e.deltaY) * CONFIG.camera.zoomStep);
+    }, { passive: true });
 
     this.clock = new THREE.Clock();
     this._loop();
@@ -147,6 +155,53 @@ class Game {
     this.bombs.handleAction(this.player.pos, this.player.facing);
   }
 
+  // 手機攻擊/魔法改為獨立按鈕，複用 input 的旗標:
+  // - 攻擊鈕: 按住 = leftDown (連段)，按下瞬間也觸發首擊 (attackQueued)
+  // - 魔法鈕: 按住 = rightDown (>=1秒轉火焰)，放開時 <1秒 = 短按閃電 (rightClickQueued)
+  _setupActionButtons() {
+    const atk = document.getElementById("tc-attack");
+    const mag = document.getElementById("tc-magic");
+
+    if (atk) {
+      const down = (e) => {
+        e.preventDefault();
+        this.input.leftDown = true;      // 按住連段
+        this.input.attackQueued = true;  // 首擊
+      };
+      const up = (e) => {
+        e.preventDefault();
+        this.input.leftDown = false;
+      };
+      atk.addEventListener("touchstart", down, { passive: false });
+      atk.addEventListener("touchend", up, { passive: false });
+      atk.addEventListener("touchcancel", up, { passive: false });
+      // 保底: 支援滑鼠 (桌機測試觸控 UI)
+      atk.addEventListener("mousedown", down);
+      atk.addEventListener("mouseup", up);
+    }
+
+    if (mag) {
+      const down = (e) => {
+        e.preventDefault();
+        this.input.rightDown = true;                  // 按住 → 依時間轉火焰
+        this.input.rightDownAt = performance.now();
+      };
+      const up = (e) => {
+        e.preventDefault();
+        if (this.input.rightDown) {
+          const held = (performance.now() - this.input.rightDownAt) / 1000;
+          if (held < 1.0) this.input.rightClickQueued = true; // 短按 → 閃電
+          this.input.rightDown = false;
+        }
+      };
+      mag.addEventListener("touchstart", down, { passive: false });
+      mag.addEventListener("touchend", up, { passive: false });
+      mag.addEventListener("touchcancel", up, { passive: false });
+      mag.addEventListener("mousedown", down);
+      mag.addEventListener("mouseup", up);
+    }
+  }
+
   _respawn() {
     this.deathScreen.classList.add("hidden");
     this.crosshair.style.display = "block";
@@ -184,15 +239,38 @@ class Game {
       this._applySlimeCount();
     });
 
+    // 滑鼠靈敏度 (PC)：1~10 對應實際係數 (預設 4 = 目前手感)
     const sensSlider = document.getElementById("sensitivity");
     const sensVal = document.getElementById("sensitivity-val");
-    // 靈敏度 1~10 對應到實際係數 (以預設 4 對到目前手感)
     const baseSens = CONFIG.camera.sensitivity / 4;
-    sensSlider.addEventListener("input", () => {
-      const v = parseInt(sensSlider.value, 10);
-      sensVal.textContent = String(v);
-      CONFIG.camera.sensitivity = baseSens * v;
-    });
+    if (sensSlider) {
+      sensSlider.addEventListener("input", () => {
+        const v = parseInt(sensSlider.value, 10);
+        sensVal.textContent = String(v);
+        CONFIG.camera.sensitivity = baseSens * v;
+      });
+    }
+
+    // 觸控靈敏度 (手機)：與滑鼠獨立，1~10 對應實際係數 (預設 4 = 目前手感)
+    const touchSlider = document.getElementById("touch-sensitivity");
+    const touchVal = document.getElementById("touch-sensitivity-val");
+    const baseTouch = CONFIG.camera.touchSensitivity / 4;
+    if (touchSlider) {
+      touchSlider.addEventListener("input", () => {
+        const v = parseInt(touchSlider.value, 10);
+        touchVal.textContent = String(v);
+        CONFIG.camera.touchSensitivity = baseTouch * v;
+      });
+    }
+
+    // 依平台只顯示對應的靈敏度設定 (手機顯示觸控、PC 顯示滑鼠)
+    const mouseSetting = document.getElementById("setting-mouse-sens");
+    const touchSetting = document.getElementById("setting-touch-sens");
+    if (this.input.isTouch) {
+      if (mouseSetting) mouseSetting.style.display = "none";
+    } else {
+      if (touchSetting) touchSetting.style.display = "none";
+    }
 
     // 炸彈數量
     const bombSlider = document.getElementById("bomb-count");
@@ -280,8 +358,11 @@ class Game {
   _updateCameraFromMouse() {
     const { dx, dy } = this.input.consumeMouse();
     const cam = CONFIG.camera;
-    this.camYaw -= dx * cam.sensitivity;   // 水平反轉
-    this.camPitch += dy * cam.sensitivity; // 垂直反轉
+    // 手機與 PC 用各自的靈敏度 (選單可分別調整)
+    const sens = this.isMobile ? cam.touchSensitivity : cam.sensitivity;
+    // 手機拖曳右=視角右轉 (較直覺)；PC 沿用原本反向
+    this.camYaw += (this.isMobile ? dx : -dx) * sens;
+    this.camPitch += dy * sens;
     this.camPitch = Math.max(cam.minPitch, Math.min(cam.maxPitch, this.camPitch));
   }
 
@@ -310,20 +391,43 @@ class Game {
   _positionCamera() {
     const cam = CONFIG.camera;
     const p = this.player.pos;
+    const lookY = p.y + cam.lookHeight; // 注視點 (角色身上)
 
-    // 攝影機位置：以角色為中心，依 yaw/pitch 環繞
-    const horiz = Math.cos(this.camPitch) * cam.distance;
-    const offX = Math.sin(this.camYaw) * horiz;
-    const offZ = Math.cos(this.camYaw) * horiz;
-    const offY = cam.height + Math.sin(this.camPitch) * cam.distance;
+    // 計算某個距離下的攝影機位置
+    const camPosAt = (dist) => {
+      const horiz = Math.cos(this.camPitch) * dist;
+      const offX = Math.sin(this.camYaw) * horiz;
+      const offZ = Math.cos(this.camYaw) * horiz;
+      const offY = cam.height + Math.sin(this.camPitch) * dist;
+      return new THREE.Vector3(p.x - offX, p.y + offY, p.z - offZ);
+    };
 
-    const desired = new THREE.Vector3(p.x - offX, p.y + offY, p.z - offZ);
+    // 目前縮放距離
+    let dist = this.camDistance;
+    let desired = camPosAt(dist);
 
-    // 避免攝影機穿地
-    desired.y = Math.max(desired.y, p.y + 0.5);
+    // 防穿地：若攝影機位置低於該處地面 (+緩衝)，就縮短距離、保持向上仰角，
+    // 讓鏡頭往角色拉近並上抬，而不是鑽到地板下。
+    const margin = 0.8;
+    for (let i = 0; i < 6; i++) {
+      const groundAtCam = this.world.getHeight(desired.x, desired.z) + margin;
+      if (desired.y >= groundAtCam) break;
+      dist *= 0.8; // 拉近
+      if (dist < cam.minDistance * 0.5) { dist = cam.minDistance * 0.5; desired = camPosAt(dist); break; }
+      desired = camPosAt(dist);
+    }
+    // 最後保險：仍不低於地面
+    const floorY = this.world.getHeight(desired.x, desired.z) + margin;
+    if (desired.y < floorY) desired.y = floorY;
 
     this.camera.position.lerp(desired, 0.25);
-    this.camera.lookAt(p.x, p.y + cam.lookHeight, p.z);
+    this.camera.lookAt(p.x, lookY, p.z);
+  }
+
+  // 縮放攝影機距離 (delta>0 拉遠、<0 拉近)
+  _zoomCamera(delta) {
+    const cam = CONFIG.camera;
+    this.camDistance = Math.max(cam.minDistance, Math.min(cam.maxDistance, this.camDistance + delta));
   }
 
   _handleAttack() {
@@ -666,6 +770,10 @@ class Game {
     const dt = Math.min(this.clock.getDelta(), 0.05); // 夾住避免卡頓爆衝
 
     if (this.running && !this.paused) {
+      // 手機雙指縮放
+      const pinch = this.input.consumePinch();
+      if (pinch) this._zoomCamera(pinch * 0.02);
+
       this._updateCameraFromMouse();
       this._handleAttack();
       this._handleDodge();

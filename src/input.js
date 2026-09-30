@@ -18,7 +18,8 @@ export class Input {
     // 觸控搖桿狀態
     this.touchMove = null;     // {x, z} 正規化移動方向，null=沒在移動
     this.touchRun = true;      // 手機預設跑步
-    this.magicQueued = false;  // 觸控雙擊魔法
+    this.magicQueued = false;  // (保留) 觸控魔法佇列
+    this.pinchDelta = 0;       // 雙指縮放累積量
 
     // 右鍵狀態：短按放閃電、長按 (>=1秒) 持續放火焰
     this.rightDown = false;
@@ -135,40 +136,62 @@ export class Input {
       moveZone.addEventListener("touchcancel", endMove);
     }
 
-    // ---- 右半：拖曳視角 + 點擊攻擊 + 雙擊魔法 ----
-    let lookId = null, lx = 0, ly = 0, moved = 0, downAt = 0, lastTap = 0;
+    // ---- 右半：單指拖曳視角 (攻擊/魔法改用獨立按鈕，這裡不再處理點擊) ----
+    let lookId = null, lx = 0, ly = 0;
     if (lookZone) {
       lookZone.addEventListener("touchstart", (e) => {
+        if (lookId !== null) return; // 已有一指在轉視角
         const t = e.changedTouches[0];
-        lookId = t.identifier; lx = t.clientX; ly = t.clientY; moved = 0; downAt = performance.now();
+        lookId = t.identifier; lx = t.clientX; ly = t.clientY;
         e.preventDefault();
       }, { passive: false });
       lookZone.addEventListener("touchmove", (e) => {
         for (const t of e.changedTouches) {
           if (t.identifier !== lookId) continue;
-          const dx = t.clientX - lx, dy = t.clientY - ly;
-          this.mouseDX += dx; this.mouseDY += dy;
-          moved += Math.abs(dx) + Math.abs(dy);
+          this.mouseDX += t.clientX - lx; this.mouseDY += t.clientY - ly;
           lx = t.clientX; ly = t.clientY;
         }
         e.preventDefault();
       }, { passive: false });
       const endLook = (e) => {
-        for (const t of e.changedTouches) {
-          if (t.identifier !== lookId) continue;
-          lookId = null;
-          const dur = performance.now() - downAt;
-          if (moved < 14 && dur < 300) {
-            // 視為點擊：判斷單擊/雙擊
-            const now = performance.now();
-            if (now - lastTap < 300) { this.magicQueued = true; lastTap = 0; }
-            else { this.attackQueued = true; lastTap = now; }
-          }
-        }
+        for (const t of e.changedTouches) if (t.identifier === lookId) lookId = null;
       };
       lookZone.addEventListener("touchend", endLook);
       lookZone.addEventListener("touchcancel", endLook);
     }
+
+    // ---- 雙指縮放 (pinch)：全畫面偵測，兩指距離變化 → 縮放量 ----
+    this.pinchDelta = 0;
+    let pinchPrev = null;
+    const activeTouches = new Map();
+    const trackPinch = (e) => {
+      for (const t of e.changedTouches) activeTouches.set(t.identifier, { x: t.clientX, y: t.clientY });
+    };
+    document.addEventListener("touchstart", trackPinch, { passive: true });
+    document.addEventListener("touchmove", (e) => {
+      for (const t of e.touches) {
+        if (activeTouches.has(t.identifier)) activeTouches.set(t.identifier, { x: t.clientX, y: t.clientY });
+      }
+      if (e.touches.length >= 2) {
+        const a = e.touches[0], b = e.touches[1];
+        const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+        if (pinchPrev !== null) this.pinchDelta += (pinchPrev - d); // 併攏(距離減小)=拉近
+        pinchPrev = d;
+      }
+    }, { passive: true });
+    const clearPinch = (e) => {
+      for (const t of e.changedTouches) activeTouches.delete(t.identifier);
+      if (e.touches.length < 2) pinchPrev = null;
+    };
+    document.addEventListener("touchend", clearPinch, { passive: true });
+    document.addEventListener("touchcancel", clearPinch, { passive: true });
+  }
+
+  // 讀取並清除累積的縮放量 (雙指 pinch)
+  consumePinch() {
+    const d = this.pinchDelta;
+    this.pinchDelta = 0;
+    return d;
   }
 
   consumeMagic() {

@@ -116,7 +116,11 @@ export const CONFIG = {
     lookHeight: 1.6,      // 看向角色身上的高度
     minPitch: -0.6,       // 上下視角限制 (弧度)
     maxPitch: 0.9,
-    sensitivity: 0.0024,  // 滑鼠靈敏度
+    sensitivity: 0.0024,  // 滑鼠靈敏度 (PC)
+    touchSensitivity: 0.004, // 觸控視角靈敏度 (手機，獨立)
+    minDistance: 3,       // 視角最近距離 (縮放下限)
+    maxDistance: 16,      // 視角最遠距離 (縮放上限)
+    zoomStep: 1.2,        // 滾輪每格縮放量
   },
 
   sword: {
