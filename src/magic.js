@@ -91,6 +91,38 @@ export class LightningMagic {
     this.auraLight = new THREE.PointLight(0xffd644, 0, 60);
     this.auraLight.visible = false;
     this.scene.add(this.auraLight);
+
+    // ---- 開場龍捲風視覺：多層旋轉雲氣 + 隨機煙霧 (流體流動感，非漏斗) ----
+    this.tornadoTimer = 0;
+    this.tornado = new THREE.Group();
+    this.tornado.visible = false;
+    const L = CONFIG.lightning;
+    // 一大群半透明煙霧球，分布在不同高度與半徑，各自繞圈 + 上升 + 脈動
+    this.tornadoPuffs = [];
+    const puffN = 46;
+    for (let i = 0; i < puffN; i++) {
+      const size = 1.4 + Math.random() * 2.6;
+      const puff = new THREE.Mesh(
+        new THREE.SphereGeometry(size, 7, 6),
+        new THREE.MeshBasicMaterial({
+          // 灰白到淡藍的雲氣色
+          color: new THREE.Color().setHSL(0.55, 0.15 + Math.random() * 0.2, 0.7 + Math.random() * 0.2),
+          transparent: true, opacity: 0.12 + Math.random() * 0.12, depthWrite: false,
+        })
+      );
+      puff.userData = {
+        a: Math.random() * Math.PI * 2,               // 目前繞轉角度
+        rad: 1.5 + Math.random() * (L.tornadoRadius * 0.85), // 繞轉半徑
+        y: 0.5 + Math.random() * 13,                  // 高度
+        spin: (0.6 + Math.random() * 1.2),            // 個別轉速倍率
+        rise: 0.6 + Math.random() * 1.6,              // 上升速度
+        wob: Math.random() * Math.PI * 2,             // 飄動相位
+        baseSize: size,
+      };
+      this.tornado.add(puff);
+      this.tornadoPuffs.push(puff);
+    }
+    this.scene.add(this.tornado);
   }
 
   get ready() {
@@ -100,10 +132,13 @@ export class LightningMagic {
   cast() {
     if (!this.ready) return false;
     this.active = true;
-    this.timer = CONFIG.lightning.duration;
+    // 施法總長 = 龍捲風 + 落雷
+    this.tornadoTimer = CONFIG.lightning.tornadoDuration;
+    this.timer = CONFIG.lightning.duration + CONFIG.lightning.tornadoDuration;
     // 冷卻從「施法結束」開始算，不再把施法時間疊進去
     this.cooldown = CONFIG.lightning.cooldown;
     this.strikeAcc = 0;
+    this.tornado.visible = true;
     return true;
   }
 
@@ -112,20 +147,27 @@ export class LightningMagic {
     // 冷卻只在「非施法」時才遞減 (施法期間不算冷卻)
     if (!this.active && this.cooldown > 0) this.cooldown -= dt;
 
-    // 施法中：定時落雷
+    // 施法中
     if (this.active) {
       this.timer -= dt;
-      this.strikeAcc += dt;
       const L = CONFIG.lightning;
+
+      // 龍捲風與落雷「同時」進行 (無先後)
+      if (this.tornadoTimer > 0) {
+        this.tornadoTimer -= dt;
+        this._updateTornado(dt, player, slimes, onKill);
+        if (this.tornadoTimer <= 0) this.tornado.visible = false;
+      }
+      // 落雷 (整個施法期間都落，與龍捲風並行)
+      this.strikeAcc += dt;
       while (this.strikeAcc >= L.strikeInterval) {
         this.strikeAcc -= L.strikeInterval;
-        // 一波落下多道雷，數量隨等級提升
         const n = (L.boltsPerWave || 1) + (this.level - 1) * (L.boltsPerLevel || 0);
         for (let i = 0; i < n; i++) {
           this._strike(player, slimes, world, onKill);
         }
       }
-      if (this.timer <= 0) this.active = false;
+      if (this.timer <= 0) { this.active = false; this.tornado.visible = false; }
     }
 
     // 施法籠罩效果：跟隨玩家、暗罩微降亮度 + 黃光閃爍
@@ -152,6 +194,54 @@ export class LightningMagic {
       if (!alive) b.dispose();
       return alive;
     });
+  }
+
+  // 龍捲風：範圍內怪物繞玩家旋轉 + 往中心拉近 + 持續扣血；同時轉動視覺
+  _updateTornado(dt, player, slimes, onKill) {
+    const L = CONFIG.lightning;
+    const cx = player.pos.x, cz = player.pos.z;
+
+    // 視覺：整團定位到玩家；每球繞圈旋轉 + 緩慢上升 + 隨機飄動 + 脈動 (雲氣流體感)
+    this.tornado.position.set(cx, player.pos.y, cz);
+    const now = performance.now() * 0.001;
+    for (const puff of this.tornadoPuffs) {
+      const d = puff.userData;
+      // 越靠上轉越快，營造捲動；半徑隨高度略微收束
+      d.a += dt * L.tornadoSpin * d.spin * (0.6 + d.y / 14);
+      d.y += dt * d.rise;
+      if (d.y > 14) { d.y = 0.5; d.a = Math.random() * Math.PI * 2; } // 循環回底部
+      const wob = Math.sin(now * 1.5 + d.wob) * 1.2;               // 飄動
+      const rr = d.rad * (1 - d.y / 22) + wob;                     // 上方略收束
+      puff.position.set(Math.cos(d.a) * rr, d.y, Math.sin(d.a) * rr);
+      // 脈動縮放 + 淡入淡出，像流動的雲氣
+      const pulse = 1 + Math.sin(now * 2 + d.wob) * 0.25;
+      puff.scale.setScalar(pulse);
+      puff.material.opacity = (0.1 + 0.12 * Math.abs(Math.sin(now + d.wob))) * (1 - d.y / 18);
+    }
+
+    // 怪物：捲入範圍內的 (排除大 Boss) 繞玩家旋轉並被往中心拉、持續受傷
+    for (const s of slimes) {
+      if (!s.alive || s.isMega || s.launched) continue;
+      let dx = s.pos.x - cx, dz = s.pos.z - cz;
+      let dist = Math.hypot(dx, dz);
+      if (dist > L.tornadoRadius || dist < 0.2) continue;
+
+      let ang = Math.atan2(dz, dx);
+      ang += L.tornadoSpin * dt;                  // 旋轉
+      dist = Math.max(1.5, dist - L.tornadoPull * dt); // 往中心拉 (不完全吸到中心)
+      s.pos.x = cx + Math.cos(ang) * dist;
+      s.pos.z = cz + Math.sin(ang) * dist;
+
+      // 持續傷害
+      const before = s.alive;
+      s.health -= L.tornadoDps * this.damageMultiplier * dt;
+      s.hitFlash = 0.1;
+      if (s.health <= 0 && before) {
+        s.alive = false;
+        s.deathTimer = 0.4;
+        s.justDied = true; // 計分由 main 掃描
+      }
+    }
   }
 
   _strike(player, slimes, world, onKill) {
@@ -308,9 +398,14 @@ export class FlameMagic {
 
 // 劍氣：連段第 5 段射出的飛行斬擊，沿前方直線飛行，對路徑上的敵人造成傷害。
 export class SwordWave {
-  constructor(scene, origin, facing) {
+  constructor(scene, origin, facing, short = false) {
     this.scene = scene;
     const W = CONFIG.swordWave;
+    // 依 short 選用短/長劍氣參數
+    this.speed = short ? W.shortSpeed : W.speed;
+    this.range = short ? W.shortRange : W.range;
+    this.width = short ? W.shortWidth : W.width;
+    this.damage = short ? W.shortDamage : W.damage;
     this.facing = facing;
     this.fwd = new THREE.Vector3(Math.sin(facing), 0, Math.cos(facing));
     this.origin = origin.clone();
@@ -319,19 +414,17 @@ export class SwordWave {
     this.done = false;
     this.hitSet = new Set(); // 已命中的敵人 (避免重複扣血)
 
-    // 外觀：一片彎月形的半透明薄片
+    // 外觀：一片彎月形的半透明薄片 (短劍氣較小)
     this.group = new THREE.Group();
     const mat = new THREE.MeshBasicMaterial({
       color: W.color, transparent: true, opacity: 0.85, side: THREE.DoubleSide,
     });
     this.mat = mat;
-    // 用一個扁平的環段當彎月
-    const blade = new THREE.Mesh(new THREE.TorusGeometry(W.width * 0.9, 0.35, 6, 12, Math.PI), mat);
+    const blade = new THREE.Mesh(new THREE.TorusGeometry(this.width * 0.9, short ? 0.22 : 0.35, 6, 12, Math.PI), mat);
     blade.rotation.x = Math.PI / 2;
     this.group.add(blade);
-    // 拖尾光暈
     const glow = new THREE.Mesh(
-      new THREE.PlaneGeometry(W.width * 2, 2),
+      new THREE.PlaneGeometry(this.width * 2, short ? 1.2 : 2),
       new THREE.MeshBasicMaterial({ color: W.color, transparent: true, opacity: 0.3, side: THREE.DoubleSide })
     );
     glow.rotation.x = -Math.PI / 2;
@@ -344,8 +437,7 @@ export class SwordWave {
 
   update(dt, enemies) {
     if (this.done) return;
-    const W = CONFIG.swordWave;
-    const step = W.speed * dt;
+    const step = this.speed * dt;
     this.pos.x += this.fwd.x * step;
     this.pos.z += this.fwd.z * step;
     this.travelled += step;
@@ -356,16 +448,16 @@ export class SwordWave {
       if (!e.alive || this.hitSet.has(e)) continue;
       const dx = e.pos.x - this.pos.x;
       const dz = e.pos.z - this.pos.z;
-      if (dx * dx + dz * dz <= (W.width + e.radius) * (W.width + e.radius)) {
-        e.takeDamage(W.damage, this.origin);
+      if (dx * dx + dz * dz <= (this.width + e.radius) * (this.width + e.radius)) {
+        e.takeDamage(this.damage, this.origin);
         this.hitSet.add(e);
       }
     }
 
     // 淡出 + 到達最遠距離則結束
-    const k = this.travelled / W.range;
+    const k = this.travelled / this.range;
     this.mat.opacity = 0.85 * (1 - k);
-    if (this.travelled >= W.range) this.done = true;
+    if (this.travelled >= this.range) this.done = true;
   }
 
   dispose() {

@@ -3,7 +3,8 @@
 export const CONFIG = {
   world: {
     size: 200,            // 地面邊長 (正方形)
-    obstacleCount: 40,    // 隨機障礙物 (樹/石) 數量
+    obstacleCount: 130,   // 隨機障礙物 (樹/石/木箱等) 數量 (加倍)
+    treeRespawn: 12,      // 樹木炸毀後幾秒重生
     groundColor: 0x4a7a3a,
     skyColor: 0x89c4f4,
     fogNear: 60,
@@ -36,17 +37,24 @@ export const CONFIG = {
     duration: 5.0,        // 施法持續時間 (秒)
     cooldown: 2.0,        // 施法結束後的冷卻秒數 (縮短)
     strikeInterval: 1.0,  // 每隔幾秒觸發一波落雷
-    boltsPerWave: 8,      // 一波同時落下的雷數 (Lv1)
+    boltsPerWave: 12,     // 一波同時落下的雷數 (Lv1) — x1.5
     boltsPerLevel: 3,     // 每升一級一波多幾道雷 (數量無上限)
-    spreadPerLevel: 0.6,  // 每升一級落雷散佈範圍增加 (縮小)
-    forwardMin: 2,        // 落雷區在玩家前方的最近距離
-    forwardMax: 8,        // 最遠距離 (縮小一半)
-    spread: 3,            // 左右散佈半徑 (縮小一半)
-    spreadMax: 6,         // 散佈半徑上限 (範圍不會無限擴大)
-    reachMax: 12,         // 前方距離上限
+    spreadPerLevel: 1.2,  // 每升一級落雷圓半徑增加
+    forwardMin: 2,        // (圓形分布未使用，保留相容)
+    forwardMax: 16,       // 落雷圓形基礎半徑 (Lv1) — 加大
+    spread: 3,            // (圓形分布未使用，保留相容)
+    spreadMax: 6,         // (保留相容)
+    reachMax: 28,         // 落雷圓形半徑上限 — 加大
     boltRadius: 1.3,      // 單道雷的傷害半徑
     damage: 34,           // 單道雷傷害
     color: 0x9fd8ff,      // 閃電顏色
+
+    // 開場龍捲風 (施法最初，以玩家為圓心)
+    tornadoDuration: 2.0, // 龍捲風持續秒數
+    tornadoRadius: 14,    // 捲入範圍半徑
+    tornadoSpin: 6.4,     // 怪物繞玩家旋轉角速度 (弧度/秒) — x2
+    tornadoPull: 2.0,     // 每秒往中心拉近的速度
+    tornadoDps: 40,       // 龍捲風每秒對捲入怪物的傷害 — x2
   },
 
   flame: {
@@ -59,11 +67,12 @@ export const CONFIG = {
   },
 
   bomb: {
-    maxOnField: 3,        // 場上同時存在的炸彈數 (可由選單調整)
-    maxOnFieldLimit: 10,  // 選單滑桿上限
-    spawnInterval: 6,     // 每隔幾秒嘗試生成一顆
+    maxOnField: 40,       // 場上同時存在的炸彈數 (預設 = 上限 MAX)
+    maxOnFieldLimit: 40,  // 選單滑桿上限
+    spawnInterval: 3,     // 每隔幾秒嘗試生成一顆 (數量多、生成快一點)
     triggerRadius: 1.5,   // 玩家靠多近會踩爆 (引信觸發)
-    pickupRadius: 12.0,   // 玩家靠多近可按 E 拾取 (增加兩倍: 4 -> 12)
+    pickupRadius: 12.0,   // 玩家靠多近可按 E 拾取
+    startInventory: 50,   // 開場預設攜帶的炸彈庫存
 
     // 投擲 (庫存炸彈丟出去)
     throwSpeed: 18,       // 水平投擲初速
@@ -132,6 +141,12 @@ export const CONFIG = {
     width: 3.2,           // 命中判定寬度 (半寬)
     damage: 55,           // 劍氣傷害
     color: 0x9fe8ff,      // 劍氣顏色
+
+    // 前四段的短距離劍氣
+    shortSpeed: 26,       // 飛行速度
+    shortRange: 7,        // 短飛行距離
+    shortWidth: 1.8,      // 命中寬度 (半寬)
+    shortDamage: 22,      // 傷害
   },
 
   slime: {
@@ -161,7 +176,7 @@ export const CONFIG = {
   },
 
   rabbit: {
-    spawnChance: 0.25,    // 生成敵人時成為兔子的機率
+    spawnChance: 0.45,    // 生成敵人時成為兔子的機率 (增加)
     radius: 0.7,
     // 血量=普通史萊姆2倍、速度=2倍、攻擊力相等
     healthMult: 2,

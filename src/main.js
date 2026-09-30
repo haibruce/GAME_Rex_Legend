@@ -76,8 +76,21 @@ class Game {
     document.getElementById("resume-btn").addEventListener("click", () => this._resume());
     this._setupMenu();
 
-    // 遊戲進行中若失去滑鼠鎖定 (例如按 ESC 或切換視窗)，自動暫停並顯示繼續提示
+    // 平台偵測：手機顯示觸控介面、切換操作與顯示
+    this.isMobile = this.input.isTouch;
+    if (this.isMobile) {
+      document.body.classList.add("mobile");
+      const tui = document.getElementById("touch-ui");
+      if (tui) tui.classList.add("hidden"); // 開始後才顯示
+      const bombBtn = document.getElementById("tc-bomb");
+      const escBtn = document.getElementById("tc-esc");
+      if (bombBtn) bombBtn.addEventListener("click", () => this._handleBombActionForce());
+      if (escBtn) escBtn.addEventListener("click", () => { this.paused ? this._resume() : this._pause(); });
+    }
+
+    // 桌機：遊戲中失去滑鼠鎖定 (ESC/切換視窗) 自動暫停 (手機不用 pointer lock)
     document.addEventListener("pointerlockchange", () => {
+      if (this.isMobile) return;
       const locked = document.pointerLockElement === this.canvas;
       if (!locked && this.running && this.player.alive) {
         this._pause();
@@ -117,10 +130,21 @@ class Game {
 
   _start() {
     this.startScreen.classList.add("hidden");
-    this.crosshair.style.display = "block";
     this.running = true;
     this.paused = false;
-    this.input.requestLock();
+    if (this.isMobile) {
+      const tui = document.getElementById("touch-ui");
+      if (tui) tui.classList.remove("hidden"); // 顯示觸控介面
+      // 手機不需 pointer lock，視角用觸控拖曳
+    } else {
+      this.crosshair.style.display = "block";
+      this.input.requestLock();
+    }
+  }
+
+  // 炸彈鈕/觸控直接觸發拾取或投擲 (不經 E 鍵佇列)
+  _handleBombActionForce() {
+    this.bombs.handleAction(this.player.pos, this.player.facing);
   }
 
   _respawn() {
@@ -229,8 +253,9 @@ class Game {
 
   _resume() {
     this.pauseScreen.classList.add("hidden");
-    this.crosshair.style.display = "block";
     this.paused = false;
+    if (this.isMobile) return; // 手機不需 pointer lock
+    this.crosshair.style.display = "block";
     this.input.requestLock();
   }
 
@@ -260,16 +285,23 @@ class Game {
     this.camPitch = Math.max(cam.minPitch, Math.min(cam.maxPitch, this.camPitch));
   }
 
-  // 依攝影機朝向把 WASD 轉成世界移動方向
+  // 依攝影機朝向把 WASD / 觸控搖桿 轉成世界移動方向
   _getMoveDir() {
     const forward = new THREE.Vector3(Math.sin(this.camYaw), 0, Math.cos(this.camYaw));
     const right = new THREE.Vector3(Math.cos(this.camYaw), 0, -Math.sin(this.camYaw));
     const dir = new THREE.Vector3();
 
-    if (this.input.isDown("KeyW")) dir.add(forward);
-    if (this.input.isDown("KeyS")) dir.sub(forward);
-    if (this.input.isDown("KeyD")) dir.sub(right);   // A/D 反轉
-    if (this.input.isDown("KeyA")) dir.add(right);
+    // 觸控搖桿優先 (手機)
+    const tm = this.input.touchMove;
+    if (tm) {
+      dir.addScaledVector(forward, tm.z);
+      dir.addScaledVector(right, -tm.x); // 與鍵盤 A/D 反轉一致
+    } else {
+      if (this.input.isDown("KeyW")) dir.add(forward);
+      if (this.input.isDown("KeyS")) dir.sub(forward);
+      if (this.input.isDown("KeyD")) dir.sub(right);   // A/D 反轉
+      if (this.input.isDown("KeyA")) dir.add(right);
+    }
 
     if (dir.lengthSq() > 0) dir.normalize();
     return dir;
@@ -353,10 +385,10 @@ class Game {
     this.magic.level = this.progression.level;
     this.flame.damageMultiplier = this.progression.magicMultiplier;
 
-    // 短按 → 閃電
-    if (this.input.consumeRightClick()) {
+    // 短按(PC 右鍵) 或 觸控雙擊 → 閃電
+    if (this.input.consumeRightClick() || this.input.consumeMagic()) {
       if (this.magic.cast()) {
-        this.player.startCast(CONFIG.lightning.duration);
+        this.player.startCast(CONFIG.lightning.duration + CONFIG.lightning.tornadoDuration);
       }
     }
 
@@ -461,6 +493,9 @@ class Game {
     const info = this.player.consumeHitInfo();
     if (!info) return;
 
+    // 前四段 (非收尾) 也附帶一道短距離劍氣
+    if (!info.finisher) this._fireSwordWave(true);
+
     const p = this.player.pos;
     const facing = this.player.facing;
     const fwd = new THREE.Vector3(Math.sin(facing), 0, Math.cos(facing));
@@ -480,13 +515,14 @@ class Game {
     }
   }
 
-  // 發射劍氣投射物 (第 5 段大橫掃)
-  _fireSwordWave() {
+  // 發射劍氣投射物。short=true 為前四段的短距離劍氣。
+  _fireSwordWave(short = false) {
     const facing = this.player.facing;
     const wave = new SwordWave(
       this.scene,
       new THREE.Vector3(this.player.pos.x, this.player.pos.y + 1.2, this.player.pos.z),
-      facing
+      facing,
+      short
     );
     this.swordWaves.push(wave);
   }
@@ -572,6 +608,9 @@ class Game {
 
   _updateBombs(dt) {
     this.bombs.update(dt, this.player.pos, (x, z, radius, dmg, playerDmg) => {
+      // 炸毀範圍內的可破壞物件 (樹木/木箱/房子塊)
+      this.world.applyExplosion(x, z, radius);
+
       // 超大規模爆炸：範圍內敵人以爆心為圓心「擊飛」出去，落地後才判定失血
       const B = CONFIG.bomb;
       for (const slime of this.slimes) {
@@ -635,7 +674,7 @@ class Game {
 
       const moveDir = this._getMoveDir();
       const wantJump = this.input.isDown("Space");
-      const run = this.input.isCapsLockOn(); // Caps Lock 開啟 = 奔跑
+      const run = this.isMobile ? true : this.input.isCapsLockOn(); // 手機預設跑步；PC 用 Caps Lock
       // Shift = 平行移動 (上半身固定朝前，下半身轉向移動方向)
       const strafe = this.input.isDown("ShiftLeft") || this.input.isDown("ShiftRight");
       // 平行移動時，角色上半身固定朝攝影機前方
@@ -647,6 +686,7 @@ class Game {
       this._updateSlimes(dt);
       this._updateMagic(dt);
       this._updateBombs(dt);
+      this.world.update(dt); // 更新可破壞物件的飛散碎片
       this._positionCamera();
       this._updateHUD();
     }

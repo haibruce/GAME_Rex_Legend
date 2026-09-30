@@ -149,30 +149,57 @@ html, body {
   font-size: 16px;
 }
 
-/* 靠近炸彈的拾取提示 */
+/* 靠近炸彈的拾取提示 (華麗脈動發光) */
 #pickup-hint {
   position: absolute;
-  bottom: 22%;
+  bottom: 24%;
   left: 50%;
-  transform: translateX(-50%);
   z-index: 9;
-  padding: 8px 18px;
-  background: rgba(0, 0, 0, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 10px;
-  font-size: 16px;
+  padding: 12px 26px;
+  background: linear-gradient(135deg, rgba(60, 30, 10, 0.75), rgba(30, 15, 5, 0.8));
+  border: 2px solid #ffb84d;
+  border-radius: 14px;
+  font-size: 18px;
+  font-weight: 700;
   color: #fff;
-  text-shadow: 0 1px 3px #000;
+  letter-spacing: 1px;
+  text-shadow: 0 2px 4px #000, 0 0 8px rgba(255, 180, 60, 0.6);
   pointer-events: none;
   display: none;
+  white-space: nowrap;
 }
 
 #pickup-hint b {
-  color: #ffd447;
+  display: inline-block;
+  min-width: 24px;
+  padding: 1px 8px;
+  margin: 0 2px;
+  background: #ffd447;
+  color: #3a2000;
+  border-radius: 6px;
+  font-weight: 900;
 }
 
 #pickup-hint.show {
   display: block;
+  /* 兩個動畫：整體呼吸縮放 + 邊框光暈脈動 */
+  animation: hint-bob 0.9s ease-in-out infinite, hint-glow 1.2s ease-in-out infinite;
+}
+
+@keyframes hint-bob {
+  0%, 100% { transform: translateX(-50%) translateY(0) scale(1); }
+  50%      { transform: translateX(-50%) translateY(-6px) scale(1.06); }
+}
+
+@keyframes hint-glow {
+  0%, 100% {
+    box-shadow: 0 0 12px 2px rgba(255, 180, 60, 0.5), inset 0 0 8px rgba(255, 200, 80, 0.3);
+    border-color: #ffb84d;
+  }
+  50% {
+    box-shadow: 0 0 28px 8px rgba(255, 210, 90, 0.85), inset 0 0 14px rgba(255, 220, 120, 0.55);
+    border-color: #ffe08a;
+  }
 }
 
 /* ---------- 大 Boss 警告 ---------- */
@@ -362,3 +389,104 @@ button:hover {
   font-size: 15px;
   background: linear-gradient(90deg, #ffd447, #ff9f43);
 }
+
+/* ---------- 手機觸控介面 ---------- */
+#touch-ui {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  pointer-events: none; /* 子元素各自開啟 */
+}
+
+/* 左半：移動搖桿區 */
+#tc-move-zone {
+  position: absolute;
+  left: 0; bottom: 0;
+  width: 45%; height: 60%;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+#tc-stick-base {
+  position: absolute;
+  width: 130px; height: 130px;
+  margin: -65px 0 0 -65px;
+  border: 3px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.25);
+  display: none; /* 觸碰時才顯示在手指處 */
+}
+
+#tc-stick-knob {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 56px; height: 56px;
+  margin: -28px 0 0 -28px;
+  border-radius: 50%;
+  background: rgba(126, 232, 250, 0.6);
+  border: 2px solid rgba(255, 255, 255, 0.5);
+}
+
+/* 右半：視角 + 攻擊區 */
+#tc-look-zone {
+  position: absolute;
+  right: 0; bottom: 0;
+  width: 55%; height: 78%;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+#tc-attack-hint {
+  position: absolute;
+  right: 24px; bottom: 30px;
+  width: 96px; height: 96px;
+  border-radius: 50%;
+  border: 2px dashed rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 13px;
+  line-height: 1.4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  text-shadow: 0 1px 3px #000;
+}
+
+/* 通用觸控按鈕 */
+.tc-btn {
+  position: absolute;
+  pointer-events: auto;
+  padding: 10px 20px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #06121f;
+  background: linear-gradient(90deg, #7ee8fa, #80ff72);
+  border: none;
+  border-radius: 10px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+  touch-action: manipulation;
+}
+
+#tc-bomb {
+  top: 54px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(90deg, #ffb84d, #ff884d);
+  color: #3a1500;
+}
+
+#tc-esc {
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 18px;
+  font-size: 14px;
+  background: rgba(20, 30, 50, 0.85);
+  color: #cfe0ff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+/* 手機版：HUD 縮小、開始畫面提示調整 */
+body.mobile #hud { transform: scale(0.85); transform-origin: top left; }
+body.mobile #crosshair { display: none !important; }
+body.mobile .controls { font-size: 13px; }

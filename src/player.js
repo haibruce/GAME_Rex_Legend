@@ -60,31 +60,38 @@ export class Player {
 
     // 正面統一朝 +Z。所有五官、徽章都放 +Z 側。
 
-    // ---- 軀幹 ----
+    // ---- 腰 (spine) 樞紐：上半身掛在它下面，可繞腰扭轉/前後傾，動作更靈活 ----
+    const SPINE_Y = 1.0;
+    this.spine = new THREE.Group();
+    this.spine.position.y = SPINE_Y;
+    this.group.add(this.spine);
+
+    // ---- 軀幹 (掛在 spine 下，座標扣掉 SPINE_Y) ----
     const torso = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.0, 0.5), cloth);
-    torso.position.y = 1.15;
+    torso.position.y = 1.15 - SPINE_Y;
     torso.castShadow = true;
-    this.group.add(torso);
+    this.spine.add(torso);
 
     // 胸前徽章 (正面辨識)
     const badge = new THREE.Mesh(
       new THREE.CircleGeometry(0.16, 5),
       new THREE.MeshStandardMaterial({ color: 0xffd447 })
     );
-    badge.position.set(0, 1.2, 0.26);
-    this.group.add(badge);
+    badge.position.set(0, 1.2 - SPINE_Y, 0.26);
+    this.spine.add(badge);
 
     // 肩膀
     const shoulders = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.25, 0.5), cloth);
-    shoulders.position.y = 1.6;
+    shoulders.position.y = 1.6 - SPINE_Y;
     shoulders.castShadow = true;
-    this.group.add(shoulders);
+    this.spine.add(shoulders);
 
-    // ---- 頭 + 五官 (朝 +Z) ----
+    // ---- 頭 + 五官 (朝 +Z)，含頸關節 ----
     const headPivot = new THREE.Group();
-    headPivot.position.y = 1.78;
-    this.group.add(headPivot);
+    headPivot.position.y = 1.78 - SPINE_Y;
+    this.spine.add(headPivot);
     this.headPivot = headPivot;
+    this._spineY = SPINE_Y;
 
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.35, 20, 20), skin);
     head.position.y = 0.17;
@@ -168,9 +175,10 @@ export class Player {
     const handGeo = new THREE.BoxGeometry(0.22, 0.2, 0.22);
 
     const makeArm = (side) => {
+      // 肩掛在 spine 下 (座標扣掉 SPINE_Y)
       const shoulder = new THREE.Group();
-      shoulder.position.set(0.57 * side, 1.55, 0);
-      this.group.add(shoulder);
+      shoulder.position.set(0.57 * side, 1.55 - SPINE_Y, 0);
+      this.spine.add(shoulder);
 
       const upper = new THREE.Mesh(upperArmGeo, cloth);
       upper.position.y = -0.22;
@@ -186,18 +194,23 @@ export class Player {
       fore.castShadow = true;
       elbow.add(fore);
 
-      const hand = new THREE.Mesh(handGeo, skin);
-      hand.position.y = -0.46;
-      hand.castShadow = true;
-      elbow.add(hand);
+      // 手腕關節 (新增)：手掌掛在 wrist 下，可獨立轉動 (揮劍甩腕更靈活)
+      const wrist = new THREE.Group();
+      wrist.position.y = -0.45;
+      elbow.add(wrist);
 
-      return { shoulder, elbow, hand };
+      const hand = new THREE.Mesh(handGeo, skin);
+      hand.position.y = -0.11;
+      hand.castShadow = true;
+      wrist.add(hand);
+
+      return { shoulder, elbow, wrist, hand };
     };
 
     const armL = makeArm(-1);
     const armR = makeArm(1);
-    this.armLPivot = armL.shoulder; this.elbowL = armL.elbow;
-    this.armRPivot = armR.shoulder; this.elbowR = armR.elbow; this.handR = armR.hand;
+    this.armLPivot = armL.shoulder; this.elbowL = armL.elbow; this.wristL = armL.wrist;
+    this.armRPivot = armR.shoulder; this.elbowR = armR.elbow; this.wristR = armR.wrist; this.handR = armR.hand;
 
     // ---- 劍 (握在右手) ----
     this.sword = new THREE.Group();
@@ -409,9 +422,9 @@ export class Player {
       if (this.knockback.lengthSq() < 0.02) this.knockback.set(0, 0, 0);
     }
 
-    // ---- 垂直：地形貼合 + 跳躍 + 閃避騰空 ----
-    // 移動後重新取得腳下地形高度 (取周圍最高點，避免站在凸面時陷進去)
-    const groundY = world.getGroundY(this.pos.x, this.pos.z);
+    // ---- 垂直：地形貼合 + 跳躍 + 閃避騰空 + 上樓 ----
+    // 傳入目前腳底高度，讓 getGroundY 納入可站立的建築表面 (樓板/樓梯)
+    const groundY = world.getGroundY(this.pos.x, this.pos.z, this.pos.y);
 
     if (wantJump && this.onGround && !dodging) {
       this.velY = p.jumpSpeed;
@@ -419,9 +432,15 @@ export class Player {
     }
 
     if (this.onGround && !dodging) {
-      // 站在地面：直接吸附到地形高度，絕不穿地也不浮空
-      this.pos.y = groundY;
-      this.velY = 0;
+      if (groundY < this.pos.y - 0.4) {
+        // 腳下支撐消失 (例如站的樓板被炸掉) → 改為自然下落
+        this.onGround = false;
+        this.velY = 0;
+      } else {
+        // 站在地面 / 走上下坡或樓梯：吸附到腳下表面
+        this.pos.y = groundY;
+        this.velY = 0;
+      }
     } else {
       // 騰空中 (跳躍或閃避)：套重力
       this.velY -= p.gravity * dt;
@@ -549,12 +568,14 @@ export class Player {
     this.kneeL.rotation.x = Math.max(0, -s) * amp * 1.4;
     this.kneeR.rotation.x = Math.max(0, s) * amp * 1.4;
 
-    // ---- 手臂：與腿反相擺動 + 手肘微彎 ----
+    // ---- 手臂：與腿反相擺動 + 手肘微彎 + 手腕輕擺 ----
     this.armLPivot.rotation.x = -s * amp * 0.95;
     this.elbowL.rotation.x = -0.25 - Math.max(0, s) * amp * 0.6;
+    if (this.wristL) this.wristL.rotation.x = s * 0.2 * this.speedRatio;
     if (!this.attacking) {
       this.armRPivot.rotation.x = s * amp * 0.95 + 0.15;
       this.elbowR.rotation.x = -0.25 - Math.max(0, -s) * amp * 0.6;
+      if (this.wristR) this.wristR.rotation.x = -s * 0.2 * this.speedRatio;
     }
 
     // 身體上下起伏 (跑步彈跳更大) + 輕微搖擺
@@ -563,8 +584,11 @@ export class Player {
     this.group.position.y = this.pos.y + bob;
     this.group.rotation.z = s * 0.05 * this.speedRatio;
 
-    // 頭部隨走路輕微點動，增加生氣
-    if (this.headPivot) this.headPivot.rotation.x = s * 0.04 * this.speedRatio;
+    // 頸關節：隨走路輕微點頭 + 左右微轉，增加生氣
+    if (this.headPivot) {
+      this.headPivot.rotation.x = s * 0.04 * this.speedRatio;
+      this.headPivot.rotation.y = Math.cos(this.walkPhase) * 0.05 * this.speedRatio;
+    }
 
     // ---- 施法姿勢：左手高舉朝天召喚閃電 (施法期間覆蓋左手走路擺動) ----
     if (this.castTimer > 0) {
@@ -592,26 +616,43 @@ export class Player {
         this.armRPivot.rotation.y = 1.7 - e * 3.4;    // 右(+)掃到左(-) 接近半圈
         this.armRPivot.rotation.z = 0.2;
         this.elbowR.rotation.x = -0.1;
+        if (this.wristR) this.wristR.rotation.x = -0.3 + Math.sin(e * Math.PI) * 0.6; // 甩腕
         this.armLPivot.rotation.x = 0.2;
         this.armLPivot.rotation.y = -0.8 + e * 1.2;
         this.bodyTwist = (0.6 - e * 1.2) * 0.8;       // 大幅轉腰
         this.bodyPitch = Math.sin(progress * Math.PI) * 0.2;
       } else {
-        // 前 4 段：奇數上劈、偶數斜劈 (左右交替方向)，動作明快
+        // 前 4 段各有不同軌跡：1 上劈 / 2 右斜劈 / 3 左斜劈 / 4 突刺
         const raise = progress < 0.3 ? progress / 0.3 : 1;
         const chop = progress < 0.3 ? 0 : (progress - 0.3) / 0.7;
         const ce = 1 - Math.pow(1 - chop, 3);
-        const odd = this.comboStep % 2 === 1;
-        // 起手方向：奇數段從右上、偶數段從左上
-        const sideSign = odd ? 1 : -1;
-        this.armRPivot.rotation.x = -Math.PI + ((-0.4) - (-Math.PI)) * ce * raise;
-        this.armRPivot.rotation.y = sideSign * (0.7 - ce * 1.4); // 斜劈的左右擺
-        this.armRPivot.rotation.z = 0;
-        this.elbowR.rotation.x = -0.1 - (1 - ce) * 0.3;
-        this.armLPivot.rotation.x = 0.2 - ce * 0.3;
-        this.armLPivot.rotation.y = 0;
-        this.bodyTwist = sideSign * (0.15 - ce * 0.3) * 0.5;
-        this.bodyPitch = -0.12 * raise + ce * 0.3;
+        const step = this.comboStep;
+
+        if (step === 4) {
+          // 突刺：手臂前伸、手肘由彎到直、手腕前戳，身體前傾
+          this.armRPivot.rotation.x = -1.5;
+          this.armRPivot.rotation.y = 0;
+          this.armRPivot.rotation.z = 0;
+          this.elbowR.rotation.x = -1.4 + ce * 1.3;   // 收回 → 刺出
+          if (this.wristR) this.wristR.rotation.x = -0.3 + ce * 0.3;
+          this.armLPivot.rotation.x = 0.3;
+          this.armLPivot.rotation.y = 0.3;
+          this.bodyTwist = -0.15 + ce * 0.1;
+          this.bodyPitch = ce * 0.35;                  // 前傾送出
+        } else {
+          // 1 上劈(sideSign 0) / 2 右斜(+1) / 3 左斜(-1)
+          const sideSign = step === 2 ? 1 : step === 3 ? -1 : 0;
+          this.armRPivot.rotation.x = -Math.PI + ((-0.4) - (-Math.PI)) * ce * raise;
+          this.armRPivot.rotation.y = sideSign * (0.9 - ce * 1.8);  // 斜劈左右掃
+          this.armRPivot.rotation.z = 0;
+          this.elbowR.rotation.x = -0.1 - (1 - ce) * 0.3;
+          // 手腕甩動：劈到後段快速下壓 (加速感)
+          if (this.wristR) this.wristR.rotation.x = -0.2 - ce * 0.5;
+          this.armLPivot.rotation.x = 0.2 - ce * 0.3;
+          this.armLPivot.rotation.y = 0;
+          this.bodyTwist = sideSign * (0.2 - ce * 0.4) * 0.6;
+          this.bodyPitch = -0.12 * raise + ce * 0.32;
+        }
       }
 
       // 一段結束：接續下一段 或 收招
@@ -626,6 +667,7 @@ export class Player {
           this.armRPivot.rotation.y = 0;
           this.armRPivot.rotation.z = 0;
           this.armLPivot.rotation.y = 0;
+          if (this.wristR) this.wristR.rotation.x = 0;
           this.bodyTwist = 0;
           this.bodyPitch = 0;
         }
@@ -635,10 +677,35 @@ export class Player {
       this.bodyPitch = (this.bodyPitch || 0) * 0.8;
     }
 
-    this.group.rotation.y = this.facing + (this.bodyTwist || 0);
-    // 攻擊時身體前傾/後仰 (繞 x)，但閃避段已 return，不衝突
-    if (this.dodgeTimer <= 0) {
-      this.group.rotation.x = this.bodyPitch || 0;
+    // 整體朝向只用 facing；上半身的扭轉/前傾/重心套在 spine (腰)，下半身站穩更自然
+    this.group.rotation.y = this.facing;
+    const busy = this.attacking || this.castTimer > 0 || this.dodgeTimer > 0;
+    if (this.spine) {
+      const now = performance.now() * 0.001;
+      // 走路：上半身反向扭轉 + 重心左右轉移 (rotation.z)
+      const walkTwist = busy ? 0 : Math.sin(this.walkPhase) * 0.1 * this.speedRatio;
+      const weightShift = busy ? 0 : Math.cos(this.walkPhase) * 0.06 * this.speedRatio;
+      // 待機呼吸：站著不動時 (speedRatio≈0) 腰部緩慢起伏
+      const idle = 1 - Math.min(1, this.speedRatio * 3);
+      const breathe = busy ? 0 : Math.sin(now * 1.6) * 0.03 * idle;
+
+      this.spine.rotation.y = (this.bodyTwist || 0) + walkTwist;
+      this.spine.rotation.x = (this.bodyPitch || 0) + breathe;
+      this.spine.rotation.z = weightShift;
+
+      // 待機呼吸：手臂與頭極輕微起伏，避免完全僵住
+      if (!busy && idle > 0.5) {
+        const b = Math.sin(now * 1.6) * 0.05 * idle;
+        this.armLPivot.rotation.x += b;
+        this.armRPivot.rotation.x += b;
+        if (this.headPivot) this.headPivot.rotation.x += Math.sin(now * 1.6 + 0.5) * 0.02 * idle;
+      }
+    }
+
+    // 走路時腳掌隨膝擺動輕微翹起 (觸地感)，讓步伐更自然
+    if (!busy && this.speedRatio > 0.05) {
+      const sw = Math.sin(this.walkPhase);
+      // 已由膝關節帶動，這裡加身體整體極輕微上下 (走路節奏，疊加在既有 bob 上)
     }
   }
 }

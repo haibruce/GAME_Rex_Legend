@@ -70,17 +70,26 @@ export class MegaBoss {
     this.body.castShadow = true;
     this.group.add(this.body);
 
-    // 大眼睛 (兇惡感：紅瞳)
+    // 大眼睛 (兇惡感：紅瞳)；保存參考供死亡時做驚恐表情
     const eyeW = new THREE.MeshStandardMaterial({ color: 0xffffff });
     const pupilM = new THREE.MeshStandardMaterial({ color: 0xcc0000, emissive: 0x550000 });
+    this.eyes = []; this.pupils = [];
     for (const sx of [-0.35, 0.35]) {
       const ew = new THREE.Mesh(new THREE.SphereGeometry(R * 0.16, 12, 12), eyeW);
       ew.position.set(sx * R, R * 1.05, R * 0.78);
-      this.group.add(ew);
+      this.group.add(ew); this.eyes.push(ew);
       const pu = new THREE.Mesh(new THREE.SphereGeometry(R * 0.08, 10, 10), pupilM);
       pu.position.set(sx * R, R * 1.05, R * 0.9);
-      this.group.add(pu);
+      this.group.add(pu); this.pupils.push(pu);
     }
+    // 嘴巴 (平常小，死亡時張大成驚恐 O 型)
+    this.mouth = new THREE.Mesh(
+      new THREE.SphereGeometry(R * 0.14, 12, 10),
+      new THREE.MeshStandardMaterial({ color: 0x300000 })
+    );
+    this.mouth.scale.set(1, 0.4, 0.5);
+    this.mouth.position.set(0, R * 0.75, R * 0.82);
+    this.group.add(this.mouth);
 
     // 種類標誌：兔王加大耳朵、史萊姆之王加皇冠
     if (this.kind === "rabbit") {
@@ -144,8 +153,100 @@ export class MegaBoss {
     this.hitFlash = 0.15;
     if (this.health <= 0) {
       this.alive = false;
-      this.deathTimer = 0.6;
       this.justDied = true;
+      // 進入誇張死亡：先驚恐上浮 1 秒，再大爆炸
+      this.deathPhase = "dying";
+      this.dyingT = 0;
+      this.gibs = [];
+      this.blastMesh = null;
+    }
+  }
+
+  _updateDeath(dt) {
+    const R = this.radius;
+    if (this.deathPhase === "dying") {
+      this.dyingT += dt;
+      const t = Math.min(1, this.dyingT / 1.0); // 1 秒
+
+      // 緩慢上浮 + 抖動
+      const shake = Math.sin(this.dyingT * 40) * 0.15 * (1 - t);
+      this.group.position.set(this.pos.x + shake, this.pos.y + t * 6, this.pos.z);
+      this.group.rotation.y += dt * 2;
+
+      // 身體漸漸發白發亮 (快爆前的過載感)
+      this.bodyMat.emissive = this.bodyMat.emissive || new THREE.Color();
+      this.bodyMat.emissive.setRGB(t * 0.8, t * 0.7, t * 0.7);
+
+      // 驚恐表情：眼白放大、瞳孔縮小變黑、嘴張成大 O
+      const es = 1 + t * 1.2;
+      for (const e of this.eyes) e.scale.setScalar(es);
+      for (const pu of this.pupils) {
+        pu.scale.setScalar(Math.max(0.3, 1 - t * 0.6));
+        if (pu.material.color) pu.material.color.setHex(0x111111); // 瞳孔變黑
+      }
+      if (this.mouth) this.mouth.scale.set(1 + t * 2.5, 0.4 + t * 2.5, 0.5 + t);
+
+      if (this.dyingT >= 1.0) {
+        this.deathPhase = "exploding";
+        this.explodeT = 0;
+        this._spawnDeathBlast();
+        // 爆炸瞬間隱藏本體
+        this.group.visible = false;
+      }
+      return;
+    }
+
+    if (this.deathPhase === "exploding") {
+      this.explodeT += dt;
+      const t = Math.min(1, this.explodeT / 0.8);
+      // 大火球擴張淡出
+      if (this.blastMesh) {
+        this.blastMesh.scale.setScalar(R * (1 + t * 4));
+        this.blastMesh.material.opacity = 0.9 * (1 - t);
+      }
+      if (this.blastLight2) this.blastLight2.intensity = 40 * (1 - t);
+      // 屍塊飛散 (拋物線 + 翻滾)
+      for (const g of this.gibs) {
+        g.vy -= 30 * dt;
+        g.mesh.position.x += g.vx * dt;
+        g.mesh.position.y += g.vy * dt;
+        g.mesh.position.z += g.vz * dt;
+        g.mesh.rotation.x += g.spin * dt;
+        g.mesh.rotation.y += g.spin * 0.7 * dt;
+        if (g.mesh.position.y < 0.2) { g.mesh.position.y = 0.2; g.vy *= -0.4; g.vx *= 0.6; g.vz *= 0.6; }
+      }
+      if (this.explodeT >= 0.8) this._deathDone = true;
+      return;
+    }
+  }
+
+  _spawnDeathBlast() {
+    const cx = this.pos.x, cy = this.pos.y + this.radius, cz = this.pos.z;
+    // 大火球
+    this.blastMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 16, 12),
+      new THREE.MeshBasicMaterial({ color: 0xffa030, transparent: true, opacity: 0.9 })
+    );
+    this.blastMesh.position.set(cx, cy, cz);
+    this.scene.add(this.blastMesh);
+    this.blastLight2 = new THREE.PointLight(0xffaa44, 40, 60);
+    this.blastLight2.position.set(cx, cy + 2, cz);
+    this.scene.add(this.blastLight2);
+    // 大量屍塊 (Boss 顏色的碎塊，往四面八方飛)
+    const gibMat = () => new THREE.MeshStandardMaterial({ color: this.baseColor, flatShading: true, roughness: 0.6 });
+    for (let i = 0; i < 40; i++) {
+      const s = 0.4 + Math.random() * 0.9;
+      const mesh = new THREE.Mesh(new THREE.DodecahedronGeometry(s, 0), gibMat());
+      mesh.position.set(cx, cy, cz);
+      this.scene.add(mesh);
+      const ang = Math.random() * Math.PI * 2;
+      const up = 6 + Math.random() * 14;
+      const out = 6 + Math.random() * 16;
+      this.gibs.push({
+        mesh,
+        vx: Math.cos(ang) * out, vy: up, vz: Math.sin(ang) * out,
+        spin: 4 + Math.random() * 8,
+      });
     }
   }
 
@@ -158,14 +259,11 @@ export class MegaBoss {
   }
 
   update(dt, playerPos, world, camera) {
-    // 死亡動畫
+    // ---- 誇張死亡：驚恐上浮 (1秒) → 大爆炸屍塊四射 (0.8秒) ----
     if (!this.alive) {
       if (this.hpBar) this.hpBar.visible = false;
       this.skillRing.visible = false;
-      this.deathTimer -= dt;
-      const k = Math.max(0, this.deathTimer / 0.6);
-      this.group.scale.setScalar(this.radius > 0 ? k : 0);
-      this.bodyMat.opacity = 0.9 * k;
+      this._updateDeath(dt);
       return false;
     }
 
@@ -375,13 +473,16 @@ export class MegaBoss {
   }
 
   get shouldRemove() {
-    return !this.alive && this.deathTimer <= 0;
+    return !this.alive && this._deathDone === true;
   }
 
   dispose() {
     this.scene.remove(this.group);
     if (this.hpBar) this.scene.remove(this.hpBar);
     if (this.skillRing) this.scene.remove(this.skillRing);
+    if (this.blastMesh) this.scene.remove(this.blastMesh);
+    if (this.blastLight2) this.scene.remove(this.blastLight2);
+    if (this.gibs) for (const g of this.gibs) this.scene.remove(g.mesh);
     this.body.geometry.dispose();
     this.bodyMat.dispose();
   }

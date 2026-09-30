@@ -227,14 +227,17 @@ export class Slime {
 
     const dist = Math.sqrt(dist2);
 
+    // 停止距離：不小於攻擊距離，且至少為 (玩家半徑 + 自身半徑) 避免與角色重疊穿模
+    const stopGap = Math.max(s.attackRange, 0.6 + this.radius);
     // ---- AI：追蹤 (所有距離都算，但超遠的用便宜運算) ----
-    if (dist < s.detectRange && dist > s.attackRange) {
+    if (dist < s.detectRange && dist > stopGap) {
       const inv = 1 / dist;
       const nx = dx * inv;
       const nz = dz * inv;
-      const tx = this.pos.x + nx * this.speed * dt;
-      const tz = this.pos.z + nz * this.speed * dt;
-      // 超遠不做障礙碰撞 (省運算)，近的才做
+      // 這步最多只前進到剛好停在 stopGap，避免衝進玩家體內
+      const step = Math.min(this.speed * dt, dist - stopGap);
+      const tx = this.pos.x + nx * step;
+      const tz = this.pos.z + nz * step;
       if (culled) {
         this.pos.x = tx;
         this.pos.z = tz;
@@ -274,8 +277,14 @@ export class Slime {
       return dealtDamage;
     }
 
-    // 貼地：遠方用便宜公式，近方用射線精準貼地
-    this.pos.y = lod ? world.getHeight(this.pos.x, this.pos.z) : world.getGroundY(this.pos.x, this.pos.z);
+    // 貼地：遠方用便宜公式，近方用射線精準貼地 (帶 currentY 可上樓)
+    if (lod) {
+      this.pos.y = world.getHeight(this.pos.x, this.pos.z);
+    } else {
+      const gY = world.getGroundY(this.pos.x, this.pos.z, this.pos.y);
+      // 支撐消失 (站的樓板被炸) → 平滑落下
+      this.pos.y = gY < this.pos.y - 0.4 ? Math.max(gY, this.pos.y - 14 * dt) : gY;
+    }
 
     if (lod) {
       // 遠方：低模、不做彈跳/擠壓動畫，位置直接放好

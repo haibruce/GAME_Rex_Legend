@@ -270,7 +270,7 @@ export class BombManager {
     this.thrown = [];       // 飛行中的投擲炸彈
     this.spawnTimer = 0;
     this.maxOnField = CONFIG.bomb.maxOnField; // 可由選單調整
-    this.inventory = 0;     // 身上庫存的炸彈數 (無上限)
+    this.inventory = CONFIG.bomb.startInventory; // 身上庫存 (開場預設值，無上限)
   }
 
   reset() {
@@ -279,7 +279,7 @@ export class BombManager {
     this.bombs = [];
     this.thrown = [];
     this.spawnTimer = 0;
-    this.inventory = 0;
+    this.inventory = CONFIG.bomb.startInventory;
   }
 
   // 身邊是否有「未觸發」且在拾取範圍內的炸彈

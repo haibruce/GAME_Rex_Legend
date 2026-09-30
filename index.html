@@ -2,7 +2,7 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Rex Legend</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -30,7 +30,7 @@
     </div>
 
     <!-- 靠近炸彈時的拾取提示 -->
-    <div id="pickup-hint">按 <b>E</b> 拾取炸彈</div>
+    <div id="pickup-hint">💣 按 <b>E</b> 拾取炸彈 ✨</div>
 
     <!-- 升級提示 -->
     <div id="levelup"></div>
@@ -43,6 +43,22 @@
 
     <!-- 受傷時的紅色畫面暈染 -->
     <div id="hurt-vignette"></div>
+
+    <!-- 手機觸控介面 (預設隱藏，偵測到觸控裝置才顯示) -->
+    <div id="touch-ui" class="hidden">
+      <!-- 左半：虛擬搖桿 (移動，預設跑步) -->
+      <div id="tc-move-zone">
+        <div id="tc-stick-base"><div id="tc-stick-knob"></div></div>
+      </div>
+      <!-- 右半：視角拖曳 + 點擊攻擊 / 雙擊魔法 -->
+      <div id="tc-look-zone">
+        <div id="tc-attack-hint">點擊=攻擊<br>雙擊=魔法</div>
+      </div>
+      <!-- 上方中央：丟炸彈 -->
+      <button id="tc-bomb" class="tc-btn">💣 炸彈</button>
+      <!-- 最上方：ESC 選單 -->
+      <button id="tc-esc" class="tc-btn">☰ 選單</button>
+    </div>
 
     <!-- 暫停 / 設定選單 (按 ESC 叫出) -->
     <div id="pause-screen" class="hidden">
@@ -69,8 +85,8 @@
         <div class="setting">
           <label for="bomb-count">炸彈數量</label>
           <div class="slider-row">
-            <input id="bomb-count" type="range" min="0" max="10" step="1" value="3" />
-            <span id="bomb-count-val">3</span>
+            <input id="bomb-count" type="range" min="0" max="40" step="1" value="40" />
+            <span id="bomb-count-val">40</span>
           </div>
         </div>
 

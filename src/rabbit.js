@@ -205,12 +205,15 @@ export class Rabbit {
     // 面向玩家
     if (dist > 0.01) this.facingAngle = Math.atan2(dx, dz);
 
+    // 停止距離：避免與角色重疊穿模
+    const stopGap = Math.max(r.attackRange, 0.6 + this.radius);
     // AI：跳著靠近
-    if (dist < r.detectRange && dist > r.attackRange) {
+    if (dist < r.detectRange && dist > stopGap) {
       const inv = 1 / dist;
       const nx = dx * inv, nz = dz * inv;
-      const tx = this.pos.x + nx * this.speed * dt;
-      const tz = this.pos.z + nz * this.speed * dt;
+      const step = Math.min(this.speed * dt, dist - stopGap);
+      const tx = this.pos.x + nx * step;
+      const tz = this.pos.z + nz * step;
       if (culled) {
         this.pos.x = tx; this.pos.z = tz;
       } else {
@@ -256,7 +259,12 @@ export class Rabbit {
       return dealtDamage;
     }
 
-    this.pos.y = lod ? world.getHeight(this.pos.x, this.pos.z) : world.getGroundY(this.pos.x, this.pos.z);
+    if (lod) {
+      this.pos.y = world.getHeight(this.pos.x, this.pos.z);
+    } else {
+      const gY = world.getGroundY(this.pos.x, this.pos.z, this.pos.y);
+      this.pos.y = gY < this.pos.y - 0.4 ? Math.max(gY, this.pos.y - 14 * dt) : gY;
+    }
     this.group.rotation.y = this.facingAngle;
 
     if (lod) {
