@@ -432,8 +432,9 @@ export class Player {
     }
 
     if (this.onGround && !dodging) {
-      if (groundY < this.pos.y - 0.4) {
-        // 腳下支撐消失 (例如站的樓板被炸掉) → 改為自然下落
+      if (groundY < this.pos.y - 0.7) {
+        // 腳下支撐明顯消失 (例如站的樓板被炸掉、走到樓板邊緣落空) → 自然下落。
+        // 門檻放寬到 0.7 (>單階 0.4)，讓逐階下樓時平順吸附、不會每階誤判成墜落。
         this.onGround = false;
         this.velY = 0;
       } else {

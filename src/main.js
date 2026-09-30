@@ -420,8 +420,44 @@ class Game {
     const floorY = this.world.getHeight(desired.x, desired.z) + margin;
     if (desired.y < floorY) desired.y = floorY;
 
+    // 室內遮擋處理：角色進入建築室內時，若攝影機仍留在建築外 (被牆擋住看不到室內)，
+    // 就沿「注視點→攝影機」方向把攝影機拉近，直到它也落進室內範圍 → 鏡頭跟進室內。
+    const zone = this._buildingZoneOf(p.x, p.z);
+    if (zone) {
+      const inner = zone.innerRadius; // 實際室內範圍 (方形半寬略縮)
+      // 攝影機到建築中心的水平距離；超出室內範圍代表卡在牆外
+      const camToCenter = Math.hypot(desired.x - zone.x, desired.z - zone.z);
+      if (camToCenter > inner) {
+        // 二分逼近：在 注視點(角色，必在室內) 與 desired(牆外) 之間，找剛好進到室內的點
+        const look = new THREE.Vector3(p.x, p.y + cam.lookHeight, p.z);
+        let lo = 0, hi = 1;
+        for (let i = 0; i < 10; i++) {
+          const mid = (lo + hi) / 2;
+          const cx = look.x + (desired.x - look.x) * mid;
+          const cz = look.z + (desired.z - look.z) * mid;
+          if (Math.hypot(cx - zone.x, cz - zone.z) > inner) hi = mid; else lo = mid;
+        }
+        desired.x = look.x + (desired.x - look.x) * lo;
+        desired.z = look.z + (desired.z - look.z) * lo;
+        desired.y = look.y + (desired.y - look.y) * lo;
+        // 室內鏡頭反應快一點，避免進出門口時鏡頭黏在牆上
+        this.camera.position.lerp(desired, 0.4);
+        this.camera.lookAt(p.x, lookY, p.z);
+        return;
+      }
+    }
+
     this.camera.position.lerp(desired, 0.25);
     this.camera.lookAt(p.x, lookY, p.z);
+  }
+
+  // 傳回角色所在的建築「室內」zone (用 innerRadius 判斷)，否則 null
+  _buildingZoneOf(x, z) {
+    for (const zone of this.world.buildingZones) {
+      const inner = zone.innerRadius ?? zone.radius;
+      if (Math.hypot(x - zone.x, z - zone.z) <= inner) return zone;
+    }
+    return null;
   }
 
   // 縮放攝影機距離 (delta>0 拉遠、<0 拉近)
@@ -803,4 +839,4 @@ class Game {
   }
 }
 
-new Game();
+window.__game = new Game();

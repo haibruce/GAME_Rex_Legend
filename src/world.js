@@ -219,16 +219,37 @@ export class World {
     }
     if (!nearBuilding) return groundY;
 
-    // 納入建築可站表面：找「不高於 currentY + 一階」的最高表面
-    const stepUp = 1.4; // 一次能踏上的高度 (階梯/樓板)
-    let best = groundY;
-    this._ray.set(new THREE.Vector3(x, 200, z), this._down);
-    const chits = this._ray.intersectObjects(this.climbMeshes, false);
-    for (const h of chits) {
-      const y = h.point.y;
-      if (y <= currentY + stepUp && y > best) best = y;
+    // 納入建築可站表面：多點採樣 (中心 + 四周) 取「腳下附近窄帶內」的最高面。
+    // 關鍵：只採納落在 [currentY - dropDown, currentY + stepUp] 窄帶內的表面，
+    //   → 避免一根垂直射線同時打到「上方數層樓梯的踏板」而把玩家瞬間吸到樓頂。
+    //   往上最多一階 (stepUp)、往下容許小落差 (dropDown) 做貼地，其餘忽略。
+    const stepUp = 0.9;    // 一次能往上踏的高度 (略高於單階 0.25，含跨上樓板)
+    const dropDown = 1.2;  // 往下貼合的容許落差 (下樓、走下平台)
+    let best = groundY;    // 預設 = 地面高度
+    let foundClimb = false;
+    const r = 0.45; // 採樣半徑 (略小於玩家碰撞半徑)
+    const samples = [
+      [0, 0], [r, 0], [-r, 0], [0, r], [0, -r],
+      [r * 0.7, r * 0.7], [-r * 0.7, r * 0.7], [r * 0.7, -r * 0.7], [-r * 0.7, -r * 0.7],
+    ];
+    for (const [ox, oz] of samples) {
+      this._ray.set(new THREE.Vector3(x + ox, 200, z + oz), this._down);
+      const chits = this._ray.intersectObjects(this.climbMeshes, false);
+      for (const h of chits) {
+        const y = h.point.y;
+        // 只取腳下窄帶內的可站面 (上一階以內 / 下方小落差內)
+        if (y > currentY + stepUp) continue;   // 太高 → 不是這一步能踏上的 (擋掉上層樓梯)
+        if (y < currentY - dropDown) continue; // 太低 → 忽略 (下方樓層的表面)
+        if (!foundClimb || y > best) { best = y; foundClimb = true; }
+      }
     }
-    return best;
+    // 窄帶內找到建築可站面 → 用它 (樓梯/樓板)；否則維持地面高度 (踏空 → 玩家重力下落)。
+    // 若地面本身就落在窄帶且更高 (例如建築外的斜坡)，取兩者較高者。
+    if (foundClimb) {
+      if (groundY <= currentY + stepUp && groundY >= currentY - dropDown) return Math.max(best, groundY);
+      return best;
+    }
+    return groundY;
   }
 
   // 起伏地面：位移頂點做出小丘陵，並依高度上色 (低=草綠、高=土黃)
@@ -418,15 +439,18 @@ export class World {
     // 門片 (視覺用，不擋路 collideR=0，可從門口走進去)
     addBlock(0, 1.4, D / 2, new THREE.BoxGeometry(cw * 0.9, ch * 1.6, 0.2), new THREE.MeshStandardMaterial({ color: 0x5a3a1a, roughness: 0.7 }), 0, 0);
 
-    // 不再放整體大圓碰撞 (那會變成隱形牆擋住入口)；改由各牆塊各自擋路
-    this.buildingZones.push({ x: hx, z: hz, radius: 12 }); // 爬樓/內部射線範圍
+    // 不再放整體大圓碰撞 (那會變成隱形牆擋住入口)；改由各牆塊各自擋路。
+    // radius = 爬樓/射線範圍 (放大)；innerRadius = 實際室內範圍 (略小於半寬 4.5)，供攝影機判斷室內。
+    this.buildingZones.push({ x: hx, z: hz, radius: 12, innerRadius: 4 });
   }
 
-  // 三層樓建築：內部樓梯可上樓 (玩家與怪物皆可)，牆/樓板/樓梯皆分件可炸毀。
+  // 三層樓建築：內部為「L 形折返樓梯」(dog-leg)，每層分兩段、中間有轉折平台。
+  // 兩段分別靠左右兩側 (不同水平位置)，樓梯井正上方留開口 → 上下樓有垂直淨空、不撞上一層樓梯。
   _makeTower() {
     const tx = 24, tz = 30;   // 出生點右前方，開場就看得到
     const gy = this.getGroundY(tx, tz);
-    const W = 9, D = 9, floorH = 4, floors = 3, t = 0.4;
+    // 房子加大到 14x14，容得下折返樓梯 (兩段 + 轉折平台) 與走道
+    const W = 14, D = 14, floorH = 4, floors = 3, t = 0.4;
 
     const stoneMat = () => new THREE.MeshStandardMaterial({
       color: new THREE.Color(0x9a9488).offsetHSL(0, 0, (Math.random() - 0.5) * 0.06),
@@ -456,44 +480,64 @@ export class World {
       this._registerDestructible(g, tx + wx, tz + wz, radius || 1.4, [{ mesh, ox: 0, oy: 0, oz: 0 }], col, null, 3, 1);
     };
 
-    const cols = 3;               // 每面牆每層分幾塊
+    // ---- 折返樓梯佈局參數 ----
+    // 第 1 段靠右半 (x>0)，沿 z 從門側(+)往內(-)爬到半層高的轉折平台；
+    // 第 2 段靠左半 (x<0)，沿 z 從內(-)往門側(+)爬到上層樓板。
+    // 樓梯井 = 左半 (x<0) 的內側區塊，上層樓板在此留開口 → 垂直淨空。
+    const halfH = floorH / 2;          // 每段爬升高度
+    const stepsPerFlight = 8;          // 每段階數
+    const stepH = halfH / stepsPerFlight; // 每階高 = 2/8 = 0.25
+    const rightX = 3.5;                // 第 1 段中心 x (右半)
+    const leftX = -3.5;                // 第 2 段中心 x (左半)
+    const treadW = 4.0;                // 踏板寬 (x 方向)
+    const zNear = D / 2 - 2.5;          // 靠門側 z (段的一端)
+    const zFar = -D / 2 + 2.5;         // 靠內牆側 z (段的另一端)
+    const landDepth = 3.0;             // 轉折平台深度 (z 方向)
+
+    // 一段直梯：沿 z 從 z0 爬到 z1，底高 yBase → 頂高 yBase+halfH
+    const buildFlight = (cx, z0, z1, yBase) => {
+      for (let s = 0; s < stepsPerFlight; s++) {
+        const frac = s / (stepsPerFlight - 1);
+        const sy = yBase + stepH * (s + 1);            // 逐階升高
+        const sz = z0 + (z1 - z0) * frac;
+        const depth = Math.abs(z1 - z0) / stepsPerFlight * 2.0 + 0.4; // 踏板互相重疊
+        addBlock(cx, sy - stepH * 0.5, sz, new THREE.BoxGeometry(treadW, stepH * 0.9, depth), woodMat(), true, 1.6);
+      }
+    };
+
+    const cols = 3;
     const cw = W / cols;
 
     for (let lv = 0; lv < floors; lv++) {
       const baseY = lv * floorH;
 
-      // 樓板：留一個固定角落開口 (a=2,b=0 → +X/-Z 角) 給樓梯上下，樓梯終點對齊此處
-      if (lv > 0) {
-        for (let a = 0; a < 3; a++) {
-          for (let b = 0; b < 3; b++) {
-            if (a === 2 && b === 0) continue; // 樓梯開口 (與樓梯對齊)
-            const fx = -W / 2 + cw * (a + 0.5);
-            const fz = -D / 2 + cw * (b + 0.5);
-            addBlock(fx, baseY, fz, new THREE.BoxGeometry(cw * 0.98, t, cw * 0.98), stoneMat(), true, 1.6);
+      // ---- 樓板 (含樓頂天台)：在「左半內側」留樓梯井開口，給上下樓垂直淨空 ----
+      // 分格鋪樓板 (4x4)，落在樓梯井範圍 (x<0 且 z<0 內側) 的格子不鋪。
+      const buildFloorAt = (floorY) => {
+        const fcols = 4;
+        const fw = W / fcols;
+        for (let a = 0; a < fcols; a++) {
+          for (let b = 0; b < fcols; b++) {
+            const fx = -W / 2 + fw * (a + 0.5);
+            const fz = -D / 2 + fw * (b + 0.5);
+            // 樓梯井開口：左半 (fx<0) 且內側 (fz<0) 的 2x2 區塊不鋪 → 對齊第 2 段樓梯與轉折平台上方
+            const inWell = (fx < 0 && fz < 0);
+            if (inWell) continue;
+            addBlock(fx, floorY, fz, new THREE.BoxGeometry(fw * 0.98, t, fw * 0.98), stoneMat(), true, 1.6);
           }
         }
-      }
-      // 頂樓天台：同樣留開口對齊樓梯 (才能從樓梯上到天台)
-      if (lv === floors - 1) {
-        for (let a = 0; a < 3; a++) {
-          for (let b = 0; b < 3; b++) {
-            if (a === 2 && b === 0) continue;
-            const fx = -W / 2 + cw * (a + 0.5);
-            const fz = -D / 2 + cw * (b + 0.5);
-            addBlock(fx, floors * floorH, fz, new THREE.BoxGeometry(cw * 0.98, t, cw * 0.98), stoneMat(), true, 1.6);
-          }
-        }
-      }
+      };
+      if (lv > 0) buildFloorAt(baseY);                    // 2、3 樓樓板
+      if (lv === floors - 1) buildFloorAt(floors * floorH); // 樓頂天台
 
-      // 四面牆 (每面 cols 塊)，正面 (+Z) 中間留門/窗開口
+      // ---- 四面牆 (每面 cols 塊)，正面 (+Z) 中間留門洞 ----
       for (let c = 0; c < cols; c++) {
         const bx = -W / 2 + cw * (c + 0.5);
         const wy = baseY + floorH / 2;
-        const wcr = cw * 0.34; // 牆塊碰撞半徑 (貼牆，通道好走)
-        const isDoorCol = (c === 1);            // 正面中間整欄當門通道 (碰撞不放)
-        const openFront = (c === 1 && lv === 0); // 一樓正面中間不建塊 (門洞)
+        const wcr = cw * 0.32;
+        const isDoorCol = (c === 1);              // 正面中間欄 = 門通道 (不放碰撞)
+        const openFront = (c === 1 && lv === 0);  // 一樓正面中間不建塊 (門洞)
         if (!openFront) {
-          // 門口欄的牆塊 (二三樓正面中間) 保留視覺但不擋路，避免堵住一樓門口通道
           addBlock(bx, wy, D / 2, new THREE.BoxGeometry(cw * 0.96, floorH, t), stoneMat(), false, 1.6, isDoorCol ? 0 : wcr);
         }
         addBlock(bx, wy, -D / 2, new THREE.BoxGeometry(cw * 0.96, floorH, t), stoneMat(), false, 1.6, wcr);
@@ -501,25 +545,22 @@ export class World {
         addBlock(W / 2, wy, -D / 2 + cw * (c + 0.5), new THREE.BoxGeometry(t, floorH, cw * 0.96), stoneMat(), false, 1.6, wcr);
       }
 
-      // 樓梯：對齊上層開口 (開口在 a=2,b=0 → fx=+3, fz=-3)。
-      // 樓梯固定在 x≈+3，z 由靠門口側(+)往開口(-3)爬升，坡度平緩讓玩家/怪物逐階走上。
-      const steps = 10;
-      const stepH = floorH / steps;
-      const openFx = -W / 2 + cw * 2.5; // 開口 x = +3
-      const zStart = openFx > 0 ? D / 2 - 1.2 : -D / 2 + 1.2; // 從靠牆側起
-      const openFz = -D / 2 + cw * 0.5;  // 開口 z = -3
-      const zEnd = openFz;               // 樓梯終點對齊開口
-      for (let s = 0; s < steps; s++) {
-        const frac = s / (steps - 1);
-        const sy = baseY + stepH * (s + 1);          // 逐階升高，最後一階 = baseY+floorH (上層樓板高)
-        const sz = zStart + (zEnd - zStart) * frac;  // 沿 z 從起點到開口
-        const depth = Math.abs(zEnd - zStart) / steps + 0.5; // 踏板夠深、彼此重疊確保連續
-        addBlock(openFx, sy - stepH * 0.5, sz, new THREE.BoxGeometry(2.2, stepH * 0.9, depth), woodMat(), true, 1.6);
-      }
+      // ---- L 形折返樓梯 ----
+      // 第 1 段：右半，門側(zNear) → 內側(zFar)，底 baseY → 半層 (baseY+halfH)
+      buildFlight(rightX, zNear, zFar, baseY);
+      // 轉折平台：在內側 (-Z)，橫跨左右兩段中心，高度 = 半層 (baseY+halfH)
+      addBlock(0, baseY + halfH - t * 0.5, zFar,
+        new THREE.BoxGeometry(Math.abs(rightX - leftX) + treadW, t, landDepth), woodMat(), true, 2.0);
+      // 第 2 段：左半，內側(zFar) → 門側(zNear)，半層 → 上層樓板 (baseY+floorH)
+      buildFlight(leftX, zFar, zNear, baseY + halfH);
+      // 第 2 段頂端過渡平台：與上層樓板同高，銜接無落差
+      addBlock(leftX, baseY + floorH - t * 0.5, zNear + 0.2,
+        new THREE.BoxGeometry(treadW, t, 2.2), woodMat(), true, 1.6);
     }
 
-    // 不放整體大圓碰撞 (會擋住入口)；由各牆塊各自擋路，門口與內部可進出
-    this.buildingZones.push({ x: tx, z: tz, radius: 14 }); // 爬樓/內部射線範圍
+    // 不放整體大圓碰撞 (會擋住入口)；由各牆塊各自擋路，門口與內部可進出。
+    // radius = 爬樓/射線範圍 (放大)；innerRadius = 實際室內範圍 (略小於半寬 7)，供攝影機判斷室內。
+    this.buildingZones.push({ x: tx, z: tz, radius: 16, innerRadius: 6 });
   }
 
   // 隨機散佈：樹、石頭、灌木、花叢
