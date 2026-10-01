@@ -270,7 +270,9 @@ export class LightningMagic {
   }
 }
 
-// 火焰魔法：持續施放時從角色前方噴出「長條形」火焰，範圍隨等級提升。
+// 火焰魔法：持續施放時從角色前方噴出「史詩級火焰衝擊波」。
+// 玩法保持不變 (方向性長條範圍傷害)，視覺升級為：
+//   白色能量核心 + 橘紅火焰層 + 明亮黃火花 + 厚重黑煙環 + 漂浮發光餘燼 + 擴張衝擊波環。
 export class FlameMagic {
   constructor(scene) {
     this.scene = scene;
@@ -279,54 +281,130 @@ export class FlameMagic {
     this.level = 1;
     this.curLength = CONFIG.flame.baseLength;
     this.curWidth = CONFIG.flame.baseWidth;
+    this._clock = 0; // 累積時間，驅動脈動/擴張
+    this._knockTimers = new Map(); // 每隻怪的吹飛計時 (持續被噴到時定期吹飛)
 
     const F = CONFIG.flame;
     this.group = new THREE.Group();
     this.group.visible = false;
 
-    // 長條形火焰主體 (box)，基準尺寸=1，之後用 scale 縮放到實際長寬
-    this.beamMat = new THREE.MeshBasicMaterial({
-      color: F.color, transparent: true, opacity: 0.35, side: THREE.DoubleSide,
+    // Additive 混色讓火焰疊加處更亮、更有能量感
+    const addMat = (color, opacity) => new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity, side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending, depthWrite: false,
     });
-    this.beam = new THREE.Mesh(new THREE.BoxGeometry(1, 0.8, 1), this.beamMat);
+
+    // ---- 噴口能量核心：白熱球 (最亮)，位於角色前方發射點 ----
+    this.core = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), addMat(0xffffff, 0.95));
+    this.group.add(this.core);
+    // 核心外圈橘黃光暈
+    this.coreGlow = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), addMat(0xffd24a, 0.6));
+    this.group.add(this.coreGlow);
+
+    // ---- 外層火焰主體 (長條噴流)：橘紅，半透明疊加 ----
+    this.beamMat = addMat(F.color, 0.32);
+    this.beam = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 1.1, 1, 14, 1, true), this.beamMat);
+    this.beam.rotation.x = Math.PI / 2; // 圓柱沿 +Z 噴出
     this.group.add(this.beam);
 
-    // 內層更亮的核心長條
-    this.coreMat = new THREE.MeshBasicMaterial({
-      color: 0xffd24a, transparent: true, opacity: 0.5, side: THREE.DoubleSide,
-    });
-    this.core = new THREE.Mesh(new THREE.BoxGeometry(1, 0.5, 1), this.coreMat);
-    this.group.add(this.core);
+    // ---- 內層亮核噴流：黃白，較細 ----
+    this.innerMat = addMat(0xffe08a, 0.5);
+    this.inner = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.6, 1, 12, 1, true), this.innerMat);
+    this.inner.rotation.x = Math.PI / 2;
+    this.group.add(this.inner);
 
-    // 火球群 (沿長條方向翻滾)
+    // ---- 擴張衝擊波環 (球形向外擴張感)：數個環，循環由核心向外脹大並淡出 ----
+    this.shockRings = [];
+    for (let i = 0; i < 3; i++) {
+      const ringMat = addMat(0xffb24a, 0.0);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(1, 0.14, 8, 24), ringMat);
+      ring.userData.phase = i / 3; // 錯開相位，形成連續脈衝
+      this.group.add(ring);
+      this.shockRings.push(ring);
+    }
+
+    // ---- 火焰/火花粒子群：沿噴流前進，橘紅與亮黃交錯 ----
     this.balls = [];
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 30; i++) {
+      const warm = i % 3 === 0 ? 0xffe14a : (i % 3 === 1 ? F.color : 0xff8a2a);
       const b = new THREE.Mesh(
-        new THREE.SphereGeometry(0.3 + Math.random() * 0.3, 8, 8),
-        new THREE.MeshBasicMaterial({ color: i % 2 ? F.color : 0xffb24a, transparent: true, opacity: 0.8 })
+        new THREE.SphereGeometry(0.18 + Math.random() * 0.34, 7, 6),
+        addMat(warm, 0.9)
       );
-      b.userData.t = Math.random();
+      b.userData = { t: Math.random(), off: (Math.random() - 0.5), rise: Math.random() };
       this.group.add(b);
       this.balls.push(b);
     }
 
-    this.light = new THREE.PointLight(F.color, 0, 16);
+    // ---- 明亮黃火花 (更小更快、閃爍) ----
+    this.sparks = [];
+    for (let i = 0; i < 24; i++) {
+      const s = new THREE.Mesh(
+        new THREE.SphereGeometry(0.06 + Math.random() * 0.1, 5, 4),
+        addMat(0xfff2a0, 1.0)
+      );
+      s.userData = { t: Math.random(), ox: (Math.random() - 0.5), oy: (Math.random() - 0.5), spd: 1.4 + Math.random() * 1.4 };
+      this.group.add(s);
+      this.sparks.push(s);
+    }
+
+    // ---- 厚重黑煙環：深灰黑球，常規混色 (非 additive) 以呈現「厚重遮擋」感，沿噴流尾段上飄 ----
+    this.smoke = [];
+    for (let i = 0; i < 16; i++) {
+      const sm = new THREE.Mesh(
+        new THREE.SphereGeometry(0.6 + Math.random() * 0.7, 7, 6),
+        new THREE.MeshBasicMaterial({
+          color: new THREE.Color().setHSL(0.06, 0.2, 0.06 + Math.random() * 0.06),
+          transparent: true, opacity: 0.0, depthWrite: false,
+        })
+      );
+      sm.userData = { t: Math.random(), ang: Math.random() * Math.PI * 2, rise: 0.6 + Math.random() * 0.8 };
+      this.group.add(sm);
+      this.smoke.push(sm);
+    }
+
+    // ---- 漂浮發光餘燼：微小亮點，緩慢上升飄散 ----
+    this.embers = [];
+    for (let i = 0; i < 20; i++) {
+      const e = new THREE.Mesh(
+        new THREE.SphereGeometry(0.05 + Math.random() * 0.06, 4, 3),
+        addMat(0xffc24a, 0.9)
+      );
+      e.userData = { t: Math.random(), ox: (Math.random() - 0.5), oz: (Math.random() - 0.5), rise: 0.8 + Math.random() * 1.0, drift: (Math.random() - 0.5) };
+      this.group.add(e);
+      this.embers.push(e);
+    }
+
+    // 動態燈光：核心的白熱光 + 外圈橘光
+    this.light = new THREE.PointLight(0xffb050, 0, 22);
     this.group.add(this.light);
+    this.coreLight = new THREE.PointLight(0xffffff, 0, 10);
+    this.group.add(this.coreLight);
 
     scene.add(this.group);
   }
 
-  // 依等級計算目前火焰長寬
+  // 依等級計算目前火焰長寬，並套用到各視覺層的尺寸
   _applyLevel(level) {
     const F = CONFIG.flame;
     this.level = level;
-    this.curLength = F.baseLength + (level - 1) * F.lengthPerLevel;
-    this.curWidth = F.baseWidth + (level - 1) * F.widthPerLevel;
-    // 長條沿 +Z 延伸：box 的 z=長度、x=寬度
-    this.beam.scale.set(this.curWidth, 1, this.curLength);
-    this.beam.position.z = this.curLength / 2;
-    this.core.scale.set(this.curWidth * 0.5, 1, this.curLength);
-    this.core.position.z = this.curLength / 2;
+    // 範圍：平緩線性成長，並夾在上限內 (封頂, 避免高等變成全地圖攻擊)。
+    // 攻擊力 (dps) 另在傷害段計算，不受此上限限制。
+    this.curLength = Math.min(F.maxLength, F.baseLength + (level - 1) * F.lengthPerLevel);
+    this.curWidth = Math.min(F.maxWidth, F.baseWidth + (level - 1) * F.widthPerLevel);
+    const len = this.curLength;
+    const w = this.curWidth;
+
+    // 噴流圓柱沿 +Z 延伸 (圓柱預設沿 y，已旋轉成 z)：scale y = 長度
+    this.beam.scale.set(w * 0.9, len, w * 0.9);
+    this.beam.position.z = len / 2;
+    this.inner.scale.set(w * 0.55, len, w * 0.55);
+    this.inner.position.z = len / 2;
+
+    // 白色能量核心：固定大小 (不隨等級變大)
+    const cr = Math.max(0.6, F.baseWidth * 0.5);
+    this.core.scale.setScalar(cr);
+    this.coreGlow.scale.setScalar(cr * 1.8);
   }
 
   // 持續施放：holding=true 時噴火並造成傷害。level 決定範圍大小。
@@ -335,47 +413,134 @@ export class FlameMagic {
     this.group.visible = holding;
     if (!holding) {
       this.light.intensity = 0;
+      this.coreLight.intensity = 0;
+      if (this._knockTimers.size > 0) this._knockTimers.clear();
       return;
     }
 
     const F = CONFIG.flame;
     this._applyLevel(level || 1);
+    this._clock += dt;
+    const T = this._clock;
     const len = this.curLength;
+    const w = this.curWidth;
     const halfW = this.curWidth / 2;
 
     // 火焰從角色前方發出
     const fwd = new THREE.Vector3(Math.sin(player.facing), 0, Math.cos(player.facing));
     const rightV = new THREE.Vector3(Math.cos(player.facing), 0, -Math.sin(player.facing));
     this.group.position.set(
-      player.pos.x + fwd.x * 0.6,
+      player.pos.x + fwd.x * 0.7,
       player.pos.y + 1.3,
-      player.pos.z + fwd.z * 0.6
+      player.pos.z + fwd.z * 0.7
     );
     this.group.rotation.y = player.facing;
 
-    // 閃爍 + 火球沿長條前進
-    const flick = 0.8 + Math.random() * 0.4;
-    this.beamMat.opacity = 0.3 * flick;
-    this.coreMat.opacity = 0.5 * flick;
-    this.light.intensity = 7 * flick;
-    this.light.position.set(0, 0, len * 0.4);
+    // 整體能量脈動 (快速閃爍 + 慢速起伏，營造電影衝擊感)
+    const flick = 0.8 + Math.random() * 0.35;
+    const pulse = 0.85 + Math.sin(T * 9) * 0.15;
 
-    for (const b of this.balls) {
-      b.userData.t += dt * 1.6;
-      if (b.userData.t > 1) b.userData.t -= 1;
-      const t = b.userData.t;
-      b.position.set(
-        (Math.random() - 0.5) * this.curWidth,
-        (Math.random() - 0.5) * 0.6,
-        t * len
-      );
-      b.scale.setScalar(1 - t * 0.4);
-      b.material.opacity = 0.85 * (1 - t);
+    // 噴口核心：白熱 + 橘光暈，脈動縮放 (大小固定，不隨等級變大)
+    const coreBase = Math.max(0.6, F.baseWidth * 0.5);
+    this.core.material.opacity = (0.85 + Math.random() * 0.15);
+    this.core.scale.setScalar(coreBase * (0.9 + Math.sin(T * 14) * 0.12));
+    this.coreGlow.material.opacity = 0.5 * flick;
+
+    // 噴流本體閃爍
+    this.beamMat.opacity = 0.3 * flick;
+    this.innerMat.opacity = 0.5 * flick;
+
+    // 動態燈光
+    this.light.intensity = 9 * flick;
+    this.light.position.set(0, 0, len * 0.35);
+    this.coreLight.intensity = 6 * pulse;
+    this.coreLight.position.set(0, 0, 0.3);
+
+    // ---- 擴張衝擊波環：由核心向外脹大並淡出，循環 (球形衝擊波感) ----
+    for (const ring of this.shockRings) {
+      ring.userData.phase += dt * 1.3;
+      if (ring.userData.phase > 1) ring.userData.phase -= 1;
+      const k = ring.userData.phase;              // 0→1 擴張進度
+      const rr = 0.4 + k * (len * 0.5);           // 半徑向外脹大
+      ring.scale.set(rr, rr, Math.max(0.4, w * 0.4));
+      ring.position.z = k * len * 0.5;            // 同時沿噴流推進
+      ring.rotation.z = T * 2 + ring.userData.phase * 6;
+      ring.material.opacity = 0.5 * (1 - k) * flick; // 越外越淡
     }
 
-    // 傷害：長條 (矩形) 範圍內的史萊姆持續扣血
+    // ---- 火焰粒子：沿噴流前進、翻滾、淡出 ----
+    for (const b of this.balls) {
+      b.userData.t += dt * 1.7;
+      if (b.userData.t > 1) b.userData.t -= 1;
+      const t = b.userData.t;
+      const spread = w * (0.3 + t * 0.5); // 越往前越擴散 (錐形噴流)
+      b.position.set(
+        b.userData.off * spread + (Math.random() - 0.5) * 0.3,
+        (Math.random() - 0.5) * 0.6 + b.userData.rise * 0.4 * t,
+        t * len
+      );
+      b.scale.setScalar((1 - t * 0.5) * (0.8 + Math.random() * 0.4));
+      b.material.opacity = 0.9 * (1 - t);
+    }
+
+    // ---- 明亮黃火花：更快、閃爍、往前噴濺 ----
+    for (const s of this.sparks) {
+      s.userData.t += dt * s.userData.spd;
+      if (s.userData.t > 1) s.userData.t -= 1;
+      const t = s.userData.t;
+      s.position.set(
+        s.userData.ox * w * (0.4 + t),
+        s.userData.oy * w * 0.5 + t * 0.5,
+        t * len * 1.05
+      );
+      s.material.opacity = (Math.random() > 0.3 ? 1 : 0.3) * (1 - t); // 閃爍
+      s.scale.setScalar(1 - t * 0.6);
+    }
+
+    // ---- 厚重黑煙環：噴流尾段 (較前方 2/3 起) 升起，環狀旋繞、放大淡出 ----
+    for (const sm of this.smoke) {
+      sm.userData.t += dt * 0.7;
+      if (sm.userData.t > 1) sm.userData.t -= 1;
+      const t = sm.userData.t;
+      sm.userData.ang += dt * 1.2;
+      const alongZ = len * (0.45 + t * 0.55);          // 從中後段往前尾
+      const ringR = w * 0.6 + t * w * 0.8;             // 環狀擴張
+      sm.position.set(
+        Math.cos(sm.userData.ang) * ringR,
+        t * sm.userData.rise * 2.2,                    // 上飄
+        alongZ
+      );
+      sm.scale.setScalar(0.8 + t * 1.6);
+      // 先濃後散：中段最濃
+      sm.material.opacity = 0.5 * Math.sin(t * Math.PI);
+    }
+
+    // ---- 漂浮發光餘燼：緩慢上升、側向飄散、閃爍淡出 ----
+    for (const e of this.embers) {
+      e.userData.t += dt * 0.5;
+      if (e.userData.t > 1) e.userData.t -= 1;
+      const t = e.userData.t;
+      e.position.set(
+        e.userData.ox * w + e.userData.drift * t * 2,
+        t * e.userData.rise * 3.0,
+        len * (0.3 + Math.random() * 0.5)
+      );
+      e.material.opacity = (0.9 * (1 - t)) * (Math.random() > 0.2 ? 1 : 0.4); // 閃爍餘燼
+      e.scale.setScalar(1 - t * 0.5);
+    }
+
+    // 攻擊力隨等級加強：每秒傷害 = 基礎 + 每級增量，再乘魔法倍率
+    const lvl = this.level;
+    const dps = (F.dps + (lvl - 1) * (F.dpsPerLevel || 0)) * this.damageMultiplier;
+    // 吹飛力道隨等級提升
+    const kbSpeed = F.knockbackBase + (lvl - 1) * (F.knockbackPerLevel || 0);
+    const seen = new Set();
+
+    // 傷害：長條 (矩形) 範圍內的史萊姆持續扣血 (玩法不變) + 定期吹飛
     for (const slime of slimes) {
       if (!slime.alive) continue;
+      // 已被吹飛中的怪 (拋物線飛行) 不重複處理
+      if (slime.launched) continue;
       const dx = slime.pos.x - player.pos.x;
       const dz = slime.pos.z - player.pos.z;
       // 投影到前方軸(沿長條)與側向軸(寬度)
@@ -384,13 +549,38 @@ export class FlameMagic {
       if (along < 0 || along > len + slime.radius) continue;
       if (Math.abs(side) > halfW + slime.radius) continue;
 
+      seen.add(slime);
       const before = slime.alive;
-      slime.health -= F.dps * this.damageMultiplier * dt;
+      slime.health -= dps * dt;
       slime.hitFlash = 0.1;
       if (slime.health <= 0 && before) {
         slime.alive = false;
         slime.deathTimer = 0.4;
         slime.justDied = true; // 計分由 main 的 justDied 掃描統一處理
+        this._knockTimers.delete(slime);
+        continue;
+      }
+
+      // ---- 吹飛：持續被噴到的怪物, 每隔 knockbackInterval 被往前吹飛一次 ----
+      // 大 Boss 太重, 不吹飛 (維持可被火燒但不會被推開)
+      if (slime.isMega || typeof slime.launch !== "function") continue;
+      const acc = (this._knockTimers.get(slime) || 0) + dt;
+      if (acc >= (F.knockbackInterval || 0.5)) {
+        this._knockTimers.set(slime, 0);
+        // 吹飛方向 = 火焰前方 + 一點側向散開, 力道隨等級
+        const spread = (Math.random() - 0.5) * 0.5;
+        const vx = (fwd.x + rightV.x * spread) * kbSpeed;
+        const vz = (fwd.z + rightV.z * spread) * kbSpeed;
+        slime.launch(new THREE.Vector3(vx, F.knockbackUp, vz), F.knockbackDamage * this.damageMultiplier);
+      } else {
+        this._knockTimers.set(slime, acc);
+      }
+    }
+
+    // 清掉已離開火焰範圍的怪物計時 (避免 Map 無限長 + 重新進入時立刻可被吹飛)
+    if (this._knockTimers.size > 0) {
+      for (const key of this._knockTimers.keys()) {
+        if (!seen.has(key)) this._knockTimers.delete(key);
       }
     }
   }

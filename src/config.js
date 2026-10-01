@@ -59,11 +59,21 @@ export const CONFIG = {
 
   flame: {
     baseLength: 10,       // 火焰長條長度 (Lv1)
-    lengthPerLevel: 2,    // 每級增加長度
+    lengthPerLevel: 0.4,  // 每級增加長度 (平緩成長, 避免高等覆蓋全場)
     baseWidth: 2.2,       // 火焰長條寬度 (Lv1)
-    widthPerLevel: 0.35,  // 每級增加寬度
-    dps: 60,              // 每秒傷害 (持續施放)
+    widthPerLevel: 0.08,  // 每級增加寬度 (平緩成長)
+    maxLength: 24,        // 火焰長度上限 (範圍封頂, 不再無限變大)
+    maxWidth: 5,          // 火焰寬度上限
+    dps: 60,              // 每秒基礎傷害 (持續施放)
+    dpsPerLevel: 14,      // 每升一級增加的每秒傷害 (加強攻擊力, 無上限)
     color: 0xff6a2b,      // 火焰顏色
+
+    // 吹飛：持續被火焰噴到的怪物，每隔一段時間被吹飛一次，力道隨等級提升
+    knockbackInterval: 0.5,  // 同一隻怪多久被吹飛一次 (秒)
+    knockbackBase: 10,       // Lv1 水平吹飛初速
+    knockbackPerLevel: 1.6,  // 每升一級增加的水平吹飛初速
+    knockbackUp: 9,          // 吹飛的垂直上拋初速
+    knockbackDamage: 8,      // 落地時的額外傷害 (隨 dps 相關, 小量)
   },
 
   bomb: {
